@@ -1,4 +1,7 @@
 [app]
+android.sdk = 33
+android.ndk = 23b
+android.build_tools = 33.0.2
 title = Sridaw
 package.name = sridaw
 package.domain = org.sridaw
