@@ -27,7 +27,7 @@ jobs:
 
     - name: Install Android SDK/NDK
       run: |
-        sudo apt install -y libncurses5 libstdc++6 zlib1g
+        sudo apt install -y libncurses6 libstdc++6 zlib1g
         buildozer android update
 
     - name: Build APK
