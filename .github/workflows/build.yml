@@ -13,6 +13,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
     - name: Install Android SDK & Accept Licenses
       run: |
         sudo apt update
@@ -21,15 +26,11 @@ jobs:
         mkdir -p $HOME/android-sdk/cmdline-tools
         cd $HOME/android-sdk/cmdline-tools
 
-        # Download and unzip the command line tools
         curl -s -o sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
         unzip -q sdk.zip
         rm sdk.zip
-
-        # Move into correct path: latest/
         mv cmdline-tools latest
 
-        # Set environment variables
         echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
         echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
         echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
@@ -38,6 +39,7 @@ jobs:
       run: |
         yes | sdkmanager --licenses
         sdkmanager "platform-tools" "platforms;android-34" "build-tools;36.0.0" "ndk;25.1.8937393"
+
     - name: Install Buildozer and Python dependencies
       run: |
         sudo apt install -y python3-pip python3-setuptools python3-wheel git
