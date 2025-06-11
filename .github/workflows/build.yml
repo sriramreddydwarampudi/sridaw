@@ -23,11 +23,14 @@ jobs:
         unzip -q tools.zip
         mv cmdline-tools latest
 
+      
+    - name: Setup Android SDK and Accept Licenses
+      run: |
         export ANDROID_HOME=$HOME/android-sdk
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
 
         yes | sdkmanager --licenses
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
+        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
     - name: Install Python deps
       run: |
