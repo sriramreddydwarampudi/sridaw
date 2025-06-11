@@ -1,9 +1,8 @@
-name: Build Kivy APK
+name: Build APK
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches: [ main ]
 
 jobs:
   build:
@@ -13,46 +12,36 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install dependencies
+    - name: Install Android SDK
       run: |
         sudo apt update
-        sudo apt install -y git zip unzip openjdk-17-jdk python3-pip python3-setuptools
-        pip install --upgrade pip
-        pip install buildozer cython
+        sudo apt install -y zip unzip openjdk-17-jdk libncurses6 zlib1g
 
-    - name: Install Android SDK / NDK
+        mkdir -p $HOME/android-sdk/cmdline-tools
+        cd $HOME/android-sdk/cmdline-tools
+        wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O tools.zip
+        unzip -q tools.zip
+        mv cmdline-tools latest
+
+        export ANDROID_HOME=$HOME/android-sdk
+        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+
+        yes | sdkmanager --licenses
+        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
+
+    - name: Install Buildozer
       run: |
-       sudo apt update
-       sudo apt install -y zip unzip openjdk-17-jdk libncurses6 libstdc++6 zlib1g
+        sudo apt install -y python3-pip python3-setuptools python3-wheel
+        pip install --upgrade buildozer cython virtualenv
 
-       mkdir -p $HOME/android-sdk/cmdline-tools
-       cd $HOME/android-sdk/cmdline-tools
-       wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O tools.zip
-       unzip -q tools.zip
-       mv cmdline-tools latest
-
-       export ANDROID_HOME=$HOME/android-sdk
-       export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-
-       yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-       $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-      "platform-tools" \
-      "platforms;android-33" \
-      "build-tools;33.0.2" \
-      "ndk;23.1.7779620"
-
-      
     - name: Build APK
       run: |
+        export ANDROID_HOME=$HOME/android-sdk
+        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
         buildozer android debug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: sridaw.apk
+        name: my-kivy-app
         path: bin/*.apk
