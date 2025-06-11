@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
+    - name: Checkout
       uses: actions/checkout@v3
 
     - name: Install Android SDK
@@ -29,9 +29,9 @@ jobs:
         yes | sdkmanager --licenses
         sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
 
-    - name: Install Buildozer
+    - name: Install Python deps
       run: |
-        sudo apt install -y python3-pip python3-setuptools python3-wheel
+        sudo apt install -y python3-pip
         pip install --upgrade buildozer cython virtualenv
 
     - name: Build APK
@@ -43,5 +43,5 @@ jobs:
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: my-kivy-app
+        name: kivy-apk
         path: bin/*.apk
