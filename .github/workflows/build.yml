@@ -33,11 +33,17 @@ jobs:
         echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
         echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
 
-    - name: Install SDK packages
+    - name: Accept SDK licenses and install packages
       run: |
-        yes | sdkmanager --licenses || true
+        mkdir -p $HOME/.android
+        touch $HOME/.android/repositories.cfg
+        # Accept all licenses
+        yes | sdkmanager --licenses
+        # Install platform tools and build-tools
         sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"
         sdkmanager --install "cmdline-tools;latest"
+        # Verify installation
+        ls $HOME/android-sdk/build-tools/34.0.0/aidl && echo "AIDL found" || echo "AIDL missing"
 
     - name: Install Python and Buildozer dependencies
       run: |
@@ -48,9 +54,7 @@ jobs:
 
     - name: Install Apache ANT manually
       run: |
-        # Download ANT from a reliable mirror
         curl -L -o apache-ant.tar.gz https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.12-bin.tar.gz
-        # Verify download
         if file apache-ant.tar.gz | grep -q "gzip compressed data"; then
           mkdir -p $HOME/android-sdk/ant
           tar xzf apache-ant.tar.gz -C $HOME/android-sdk/ant --strip-components=1
@@ -61,18 +65,16 @@ jobs:
           exit 1
         fi
 
-    - name: Set Android paths for Buildozer
+    - name: Configure Buildozer
       run: |
         echo "ANDROIDSDK=$HOME/android-sdk" >> $GITHUB_ENV
         echo "ANDROIDNDK=$HOME/android-sdk/ndk/25.1.8937393" >> $GITHUB_ENV
-        # Configure buildozer
+        # Update buildozer.spec
         sed -i "s|^#\?android\.sdk_path =.*|android.sdk_path = $ANDROIDSDK|" buildozer.spec
         sed -i "s|^#\?android\.ndk_path =.*|android.ndk_path = $ANDROIDNDK|" buildozer.spec
         echo "android.ant_path = $HOME/android-sdk/ant" >> buildozer.spec
-        # Accept licenses
-        mkdir -p $HOME/.android
-        touch $HOME/.android/repositories.cfg
-        yes | sdkmanager --licenses
+        # Ensure build-tools are properly referenced
+        echo "android.build_tools_version = 34.0.0" >> buildozer.spec
 
     - name: Build APK with Buildozer
       run: |
