@@ -1,50 +1,48 @@
-name: Build APK
+name: Build Kivy APK
 
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-    - name: Install Android SDK
+    - name: Install Android SDK & Tools
       run: |
         sudo apt update
         sudo apt install -y zip unzip openjdk-17-jdk libncurses6 zlib1g
 
         mkdir -p $HOME/android-sdk/cmdline-tools
         cd $HOME/android-sdk/cmdline-tools
-        wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O tools.zip
-        unzip -q tools.zip
-        mv cmdline-tools latest
+        curl -s -o sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
+        unzip -q sdk.zip -d latest
+        rm sdk.zip
 
-      
-    - name: Setup Android SDK and Accept Licenses
-      run: |
         export ANDROID_HOME=$HOME/android-sdk
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
 
         yes | sdkmanager --licenses
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
 
-    - name: Install Python deps
+    - name: Install Buildozer & Python deps
       run: |
-        sudo apt install -y python3-pip
+        sudo apt install -y python3-pip python3-setuptools python3-wheel
         pip install --upgrade buildozer cython virtualenv
 
-    - name: Build APK
+    - name: Run Buildozer
       run: |
         export ANDROID_HOME=$HOME/android-sdk
         export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-        buildozer android debug
+        buildozer -v android debug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: kivy-apk
+        name: sridaw-apk
         path: bin/*.apk
