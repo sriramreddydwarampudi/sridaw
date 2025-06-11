@@ -42,17 +42,30 @@ jobs:
     - name: Install Python and Buildozer dependencies
       run: |
         sudo apt install -y python3-pip python3-setuptools python3-wheel git autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake
-        # libtinfo5 is not available, using libtinfo6 instead
         sudo apt install -y libtinfo6
         pip install --upgrade pip
-        pip install buildozer cython virtualenv
+        # Install buildozer with PEP 517 support
+        pip install --use-pep517 buildozer cython virtualenv
+        # Install sh separately to avoid wheel warning
+        pip install --use-pep517 sh
+
+    - name: Install Apache ANT manually
+      run: |
+        # Download ANT from a mirror that works with GitHub Actions
+        curl -s -o apache-ant.tar.gz https://downloads.apache.org/ant/binaries/apache-ant-1.10.12-bin.tar.gz
+        mkdir -p $HOME/android-sdk/ant
+        tar xzf apache-ant.tar.gz -C $HOME/android-sdk/ant --strip-components=1
+        rm apache-ant.tar.gz
+        echo "$HOME/android-sdk/ant/bin" >> $GITHUB_PATH
 
     - name: Set Android paths for Buildozer
       run: |
         echo "ANDROIDSDK=$HOME/android-sdk" >> $GITHUB_ENV
         echo "ANDROIDNDK=$HOME/android-sdk/ndk/25.1.8937393" >> $GITHUB_ENV
+        # Configure buildozer to use our manually installed ANT
         sed -i "s|^#\?android\.sdk_path =.*|android.sdk_path = $ANDROIDSDK|" buildozer.spec
         sed -i "s|^#\?android\.ndk_path =.*|android.ndk_path = $ANDROIDNDK|" buildozer.spec
+        echo "android.ant_path = $HOME/android-sdk/ant" >> buildozer.spec
         # Ensure buildozer recognizes the licenses
         mkdir -p $HOME/.android
         touch $HOME/.android/repositories.cfg
