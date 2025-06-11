@@ -1,27 +1,34 @@
 [app]
-title = SridawApp
-package.name = sridaw
+title = MyApp
+package.name = myapp
 package.domain = org.example
-
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
-version = 0.1
+version = 1.0
 requirements = python3,kivy
-
-# This can remain 'debug' unless you're signing for release
-android.arch = armeabi-v7a
+orientation = portrait
+osx.kivy_version = 2.3.0
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
 
-# IMPORTANT: Set these to prevent Buildozer downloading SDK/NDK
-android.sdk_path = $ANDROIDSDK
-android.ndk_path = $ANDROIDNDK
-
-# Optional: explicitly specify NDK version
+[app.android]
+# Optional: uncomment to fix version
+android.api = 30
+android.minapi = 21
 android.ndk = 25b
+android.gradle_dependencies = 
+android.sdk = 24
+# Optional: increase if needed
+android.permissions = INTERNET
 
-# Optional: skip downloading android sources and extras
-android.accept_sdk_license = True
-android.accept_sdk_license_repositories = true
+# Optional: uncomment if your app needs to stay awake, etc.
+# android.permissions = INTERNET,WAKE_LOCK
+
+# Optional: if using Java modules
+# android.add_jars = libs/my-lib.jar
+
+# Optional: icon and presplash
+# icon.filename = %(source.dir)s/icon.png
+# presplash.filename = %(source.dir)s/splash.png
