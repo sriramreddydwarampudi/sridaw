@@ -1,18 +1,27 @@
 [app]
-# In buildozer.spec
-android.api = 34
-android.ndk = 25.1.8937393
-android.sdk = 36.0.0
-title = Sridaw
+title = SridawApp
 package.name = sridaw
-package.domain = org.sridaw
+package.domain = org.example
+
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 0.1
-requirements = python3,kivy,music21
-orientation = portrait
-android.permissions = INTERNET
+requirements = python3,kivy
+
+# This can remain 'debug' unless you're signing for release
+android.arch = armeabi-v7a
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
+
+# IMPORTANT: Set these to prevent Buildozer downloading SDK/NDK
+android.sdk_path = $ANDROIDSDK
+android.ndk_path = $ANDROIDNDK
+
+# Optional: explicitly specify NDK version
+android.ndk = 25b
+
+# Optional: skip downloading android sources and extras
+android.accept_sdk_license = True
+android.accept_sdk_license_repositories = true
