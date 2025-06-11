@@ -25,19 +25,28 @@ jobs:
         pip install --upgrade pip
         pip install buildozer cython
 
-    - name: Install Android SDK/NDK
+    - name: Install Android SDK / NDK
       run: |
-        sudo apt update
-        sudo apt install -y zip unzip openjdk-17-jdk libncurses6 libstdc++6 zlib1g
-        wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
-        unzip -q commandlinetools-linux-*.zip -d cmdline-tools
-        mkdir -p $HOME/android-sdk/cmdline-tools/latest
-        mv cmdline-tools $HOME/android-sdk/cmdline-tools/latest
-        export ANDROID_HOME=$HOME/android-sdk
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH
-        yes | sdkmanager --licenses
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
+       sudo apt update
+       sudo apt install -y zip unzip openjdk-17-jdk libncurses6 libstdc++6 zlib1g
 
+       mkdir -p $HOME/android-sdk/cmdline-tools
+       cd $HOME/android-sdk/cmdline-tools
+       wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O tools.zip
+       unzip -q tools.zip
+       mv cmdline-tools latest
+
+       export ANDROID_HOME=$HOME/android-sdk
+       export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+
+       yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+       $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+      "platform-tools" \
+      "platforms;android-33" \
+      "build-tools;33.0.2" \
+      "ndk;23.1.7779620"
+
+      
     - name: Build APK
       run: |
         buildozer android debug
