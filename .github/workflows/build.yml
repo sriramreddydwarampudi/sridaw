@@ -13,70 +13,49 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install Android SDK & Accept Licenses
+    - name: Install System Dependencies
       run: |
         sudo apt update
-        sudo apt install -y zip unzip openjdk-17-jdk libncurses6 zlib1g curl
+        sudo apt install -y zip unzip openjdk-17-jdk libncurses6 zlib1g-dev curl git
+        sudo apt install -y python3-pip python3-venv python3-setuptools
 
-        mkdir -p $HOME/android-sdk/cmdline-tools
-        cd $HOME/android-sdk/cmdline-tools
-
-        # Download command line tools
-        curl -s -o sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
-        unzip -q sdk.zip
-        rm sdk.zip
-        mv cmdline-tools latest
-
-        # Set environment variables
-        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
-
-    - name: Accept SDK licenses and install packages
+    - name: Setup Android SDK
       run: |
-        mkdir -p $HOME/.android
-        touch $HOME/.android/repositories.cfg
-        # Accept all licenses
+        mkdir -p ~/android-sdk
+        cd ~/android-sdk
+        wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
+        unzip commandlinetools-linux-10406996_latest.zip
+        rm commandlinetools-linux-10406996_latest.zip
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/
+        
+        echo "ANDROID_HOME=~/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=~/android-sdk" >> $GITHUB_ENV
+        echo "PATH=~/android-sdk/cmdline-tools/latest/bin:~/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
+
+    - name: Install Android Tools
+      run: |
         yes | sdkmanager --licenses
-        # Install platform tools and build-tools
-        sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"
-        sdkmanager --install "cmdline-tools;latest"
-        # Verify installation
-        ls $HOME/android-sdk/build-tools/34.0.0/aidl && echo "AIDL found" || echo "AIDL missing"
+        sdkmanager --update
+        sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+        sdkmanager "ndk;25.1.8937393"
+        
+        # Verify AIDL exists
+        ls ~/android-sdk/build-tools/34.0.0/aidl || echo "AIDL check failed"
 
-    - name: Install Python and Buildozer dependencies
+    - name: Install Buildozer and Dependencies
       run: |
-        sudo apt install -y python3-pip python3-setuptools python3-wheel git autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake
-        sudo apt install -y libtinfo6
-        pip install --upgrade pip
-        pip install --use-pep517 buildozer cython virtualenv sh
-
-    - name: Install Apache ANT manually
-      run: |
-        curl -L -o apache-ant.tar.gz https://archive.apache.org/dist/ant/binaries/apache-ant-1.10.12-bin.tar.gz
-        if file apache-ant.tar.gz | grep -q "gzip compressed data"; then
-          mkdir -p $HOME/android-sdk/ant
-          tar xzf apache-ant.tar.gz -C $HOME/android-sdk/ant --strip-components=1
-          rm apache-ant.tar.gz
-          echo "$HOME/android-sdk/ant/bin" >> $GITHUB_PATH
-        else
-          echo "Failed to download valid ANT archive"
-          exit 1
-        fi
+        pip install --upgrade pip wheel setuptools
+        pip install buildozer cython virtualenv
 
     - name: Configure Buildozer
       run: |
-        echo "ANDROIDSDK=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "ANDROIDNDK=$HOME/android-sdk/ndk/25.1.8937393" >> $GITHUB_ENV
-        # Update buildozer.spec
-        sed -i "s|^#\?android\.sdk_path =.*|android.sdk_path = $ANDROIDSDK|" buildozer.spec
-        sed -i "s|^#\?android\.ndk_path =.*|android.ndk_path = $ANDROIDNDK|" buildozer.spec
-        echo "android.ant_path = $HOME/android-sdk/ant" >> buildozer.spec
-        # Ensure build-tools are properly referenced
+        echo "android.sdk_path = $HOME/android-sdk" >> buildozer.spec
+        echo "android.ndk_path = $HOME/android-sdk/ndk/25.1.8937393" >> buildozer.spec
         echo "android.build_tools_version = 34.0.0" >> buildozer.spec
+        echo "android.accept_sdk_license = True" >> buildozer.spec
 
-    - name: Build APK with Buildozer
+    - name: Build APK
       run: |
         buildozer -v android debug
 
