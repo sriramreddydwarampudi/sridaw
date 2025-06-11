@@ -38,6 +38,12 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install Cython==0.29.33 buildozer
 
+      - name: Accept Android SDK licenses
+        run: |
+          mkdir -p ~/.android
+          echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > ~/.android/repositories.cfg
+          yes | sdkmanager --licenses || true
+
       - name: Install requirements.txt (if exists)
         run: |
           if [ -f requirements.txt ]; then
