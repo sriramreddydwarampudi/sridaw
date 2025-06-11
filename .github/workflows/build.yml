@@ -13,38 +13,37 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install dependencies
+    - name: Install Android SDK & Accept Licenses
       run: |
         sudo apt update
-        sudo apt install -y \
-          zip unzip curl \
-          openjdk-17-jdk \
-          libncurses6 zlib1g libtinfo6 \
-          libssl-dev libffi-dev \
-          python3-pip python3-setuptools python3-wheel \
-          build-essential
+        sudo apt install -y zip unzip openjdk-17-jdk libncurses6 zlib1g curl
 
-    - name: Install Android SDK & Tools
-      run: |
         mkdir -p $HOME/android-sdk/cmdline-tools
         cd $HOME/android-sdk/cmdline-tools
+
+        # Download and unzip the command line tools
         curl -s -o sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
-        unzip -q sdk.zip -d latest
+        unzip -q sdk.zip
         rm sdk.zip
 
-        echo "export ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
-        echo "export PATH=$HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
+        # Move into correct path: latest/
+        mv cmdline-tools latest
 
-        yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-        $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager \
-          "platform-tools" \
-          "platforms;android-33" \
-          "build-tools;33.0.2" \
-          "ndk;23.1.7779620"
+        # Set environment variables
+        echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+        echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+        echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
 
-    - name: Install Buildozer & Python deps
+    - name: Install SDK packages
       run: |
-        pip install --upgrade buildozer cython virtualenv
+        yes | sdkmanager --licenses
+        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
+
+    - name: Install Buildozer and Python dependencies
+      run: |
+        sudo apt install -y python3-pip python3-setuptools python3-wheel git
+        pip install --upgrade pip
+        pip install buildozer cython virtualenv
 
     - name: Build APK with Buildozer
       run: |
