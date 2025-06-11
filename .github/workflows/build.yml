@@ -2,7 +2,7 @@ name: Build Kivy APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -10,39 +10,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-    - name: Install Android SDK & Tools
-      run: |
-        sudo apt update
-        sudo apt install -y zip unzip openjdk-17-jdk libncurses6 zlib1g
-
-        mkdir -p $HOME/android-sdk/cmdline-tools
-        cd $HOME/android-sdk/cmdline-tools
-        curl -s -o sdk.zip https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
-        unzip -q sdk.zip -d latest
-        rm sdk.zip
-
-        export ANDROID_HOME=$HOME/android-sdk
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-
-        yes | sdkmanager --licenses
-        sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2" "ndk;23.1.7779620"
-
-    - name: Install Buildozer & Python deps
-      run: |
-        sudo apt install -y python3-pip python3-setuptools python3-wheel
-        pip install --upgrade buildozer cython virtualenv
-
-    - name: Run Buildozer
-      run: |
-        export ANDROID_HOME=$HOME/android-sdk
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-        buildozer -v android debug
+    - name: Build APK with Buildozer
+      uses: digreatbrian/buildozer-action@v2
+      with:
+        python-version: '3.10'
+        buildozer-cmd: buildozer android debug
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: sridaw-apk
-        path: bin/*.apk
+        path: ${{ steps.buildozer.outputs.filename }}
