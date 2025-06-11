@@ -1,7 +1,8 @@
 [app]
-android.sdk = 33
-android.ndk = 23b
-android.build_tools = 33.0.2
+# In buildozer.spec
+android.api = 34
+android.ndk = 25.1.8937393
+android.sdk = 36.0.0
 title = Sridaw
 package.name = sridaw
 package.domain = org.sridaw
