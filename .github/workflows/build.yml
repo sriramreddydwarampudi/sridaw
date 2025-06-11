@@ -41,7 +41,9 @@ jobs:
 
     - name: Install Python and Buildozer dependencies
       run: |
-        sudo apt install -y python3-pip python3-setuptools python3-wheel git autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake
+        sudo apt install -y python3-pip python3-setuptools python3-wheel git autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake
+        # libtinfo5 is not available, using libtinfo6 instead
+        sudo apt install -y libtinfo6
         pip install --upgrade pip
         pip install buildozer cython virtualenv
 
