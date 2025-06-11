@@ -1,66 +1,20 @@
-name: Build Kivy APK
-
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Build APK
+        uses: digreatbrian/buildozer-action@v2
+        with:
+          python-version: 3.8
+          buildozer-cmd: buildozer -v android debug
 
-    - name: Install System Dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y zip unzip openjdk-17-jdk libncurses6 zlib1g-dev curl git
-        sudo apt install -y python3-pip python3-venv python3-setuptools
-
-    - name: Setup Android SDK
-      run: |
-        mkdir -p ~/android-sdk
-        cd ~/android-sdk
-        wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip
-        unzip commandlinetools-linux-10406996_latest.zip
-        rm commandlinetools-linux-10406996_latest.zip
-        mkdir -p cmdline-tools/latest
-        mv cmdline-tools/* cmdline-tools/latest/
-        
-        echo "ANDROID_HOME=~/android-sdk" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=~/android-sdk" >> $GITHUB_ENV
-        echo "PATH=~/android-sdk/cmdline-tools/latest/bin:~/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
-
-    - name: Install Android Tools
-      run: |
-        yes | sdkmanager --licenses
-        sdkmanager --update
-        sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-        sdkmanager "ndk;25.1.8937393"
-        
-        # Verify AIDL exists
-        ls ~/android-sdk/build-tools/34.0.0/aidl || echo "AIDL check failed"
-
-    - name: Install Buildozer and Dependencies
-      run: |
-        pip install --upgrade pip wheel setuptools
-        pip install buildozer cython virtualenv
-
-    - name: Configure Buildozer
-      run: |
-        echo "android.sdk_path = $HOME/android-sdk" >> buildozer.spec
-        echo "android.ndk_path = $HOME/android-sdk/ndk/25.1.8937393" >> buildozer.spec
-        echo "android.build_tools_version = 34.0.0" >> buildozer.spec
-        echo "android.accept_sdk_license = True" >> buildozer.spec
-
-    - name: Build APK
-      run: |
-        buildozer -v android debug
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: sridaw-apk
-        path: bin/*.apk
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: ./bin/*.apk
