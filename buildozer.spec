@@ -1,11 +1,12 @@
 [app]
-title = MyApp
-package.name = myapp
+title = sridaw
+package.name = sridaw
 package.domain = org.example
+log_level = 2
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
-requirements = python3,kivy,music21,numpy,matplotlib
+requirements = python3,kivy,music21,numpy,matplotlib,jnius
 orientation = portrait
 osx.kivy_version = 2.3.0
 
