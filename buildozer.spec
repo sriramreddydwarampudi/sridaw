@@ -22,8 +22,7 @@ android.ndk = 25b
 android.gradle_dependencies = 
 android.sdk = 24
 # Optional: increase if needed
-android.permissions = INTERNET
-android.permissions = READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
+android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET
 android.add_libs_armeabi_v7a = libfluidsynth.so
 # Optional: uncomment if your app needs to stay awake, etc.
 # android.permissions = INTERNET,WAKE_LOCK
