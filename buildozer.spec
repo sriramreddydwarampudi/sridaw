@@ -5,7 +5,7 @@ package.domain = org.example
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
-requirements = python3,kivy
+requirements = python3,kivy,music21,numpy,matplotlib
 orientation = portrait
 osx.kivy_version = 2.3.0
 
@@ -22,7 +22,8 @@ android.gradle_dependencies =
 android.sdk = 24
 # Optional: increase if needed
 android.permissions = INTERNET
-
+android.permissions = READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
+android.add_libs_armeabi_v7a = libfluidsynth.so
 # Optional: uncomment if your app needs to stay awake, etc.
 # android.permissions = INTERNET,WAKE_LOCK
 
