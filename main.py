@@ -1,347 +1,188 @@
-import os
-import tempfile
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, Line
+from kivy.uix.filechooser import FileChooserListView
+from kivy.uix.image import Image
 from kivy.clock import Clock
-from kivy.utils import platform
-import threading
-import time
+from kivy.graphics.texture import Texture
+from kivy.core.audio import SoundLoader
+from kivy.logger import Logger
 
-# Import music21 components
+import numpy as np
+import io
+import os
+from datetime import datetime
+
+# Music21 imports
 try:
-    from music21 import stream, note, chord, scale, duration, tempo, meter, key
-    from music21.midi import MidiFile
-    from music21 import environment
-    # Set music21 to work offline
-    environment.set('autoDownload', 'False')
-    environment.set('debug', 0)
-    MUSIC21_AVAILABLE = True
+    from music21 import converter, stream, midi, note, chord, environment
+    from music21.graph import PlotStream
+    music21_available = True
 except ImportError:
-    MUSIC21_AVAILABLE = False
+    music21_available = False
+    Logger.error("Music21 not available - some features disabled")
 
-# Audio playback imports
-if platform == 'android':
-    try:
-        from jnius import autoclass, PythonJavaClass, java_method
-        from android.permissions import request_permissions, Permission
-        MediaPlayer = autoclass('android.media.MediaPlayer')
-        Uri = autoclass('android.net.Uri')
-        File = autoclass('java.io.File')
-        Environment = autoclass('android.os.Environment')
-        AUDIO_AVAILABLE = True
-    except ImportError:
-        AUDIO_AVAILABLE = False
-else:
-    try:
-        import pygame
-        pygame.mixer.init()
-        AUDIO_AVAILABLE = True
-    except ImportError:
-        AUDIO_AVAILABLE = False
-
-
-class PianoRollWidget(Widget):
+class Music21Player(BoxLayout):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.notes_data = []
-        self.bind(size=self.redraw, pos=self.redraw)
-    
-    def set_notes(self, notes_data):
-        self.notes_data = notes_data
-        self.redraw()
-    
-    def redraw(self, *args):
-        self.canvas.clear()
-        if not self.notes_data:
-            return
+        super(Music21Player, self).__init__(**kwargs)
+        self.orientation = 'vertical'
+        self.spacing = 10
+        self.padding = 10
         
-        with self.canvas:
-            # Background
-            Color(0.1, 0.1, 0.1, 1)
-            Rectangle(pos=self.pos, size=self.size)
-            
-            # Piano roll grid
-            Color(0.3, 0.3, 0.3, 1)
-            # Horizontal lines (pitches)
-            for i in range(128):  # MIDI pitch range
-                y = self.y + (i / 127) * self.height
-                Line(points=[self.x, y, self.x + self.width, y], width=0.5)
-            
-            # Vertical lines (time)
-            if self.notes_data:
-                max_time = max(note['end'] for note in self.notes_data)
-                for i in range(int(max_time) + 1):
-                    x = self.x + (i / max_time) * self.width
-                    Line(points=[x, self.y, x, self.y + self.height], width=0.5)
-            
-            # Draw notes
-            for note_data in self.notes_data:
-                pitch = note_data['pitch']
-                start_time = note_data['start']
-                end_time = note_data['end']
-                
-                # Note color based on pitch
-                hue = (pitch % 12) / 12.0
-                Color(hue, 0.8, 1, 0.8, mode='hsv')
-                
-                # Calculate positions
-                if self.notes_data:
-                    x = self.x + (start_time / max_time) * self.width
-                    width = ((end_time - start_time) / max_time) * self.width
-                    y = self.y + (pitch / 127) * self.height
-                    height = self.height / 127 * 2  # Note height
-                    
-                    Rectangle(pos=(x, y), size=(width, height))
-
-
-class MusicApp(App):
-    def build(self):
-        if not MUSIC21_AVAILABLE:
-            return Label(text="music21 not available. Install with: pip install music21")
-        
-        main_layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
-        
-        # Title
-        title = Label(text='Music21 Android App', size_hint_y=None, height=50,
-                     font_size=20, bold=True)
-        main_layout.add_widget(title)
-        
-        # Control buttons
-        controls = BoxLayout(orientation='horizontal', size_hint_y=None, height=50)
-        
-        self.generate_btn = Button(text='Generate Music', size_hint_x=0.33)
-        self.generate_btn.bind(on_press=self.generate_music)
-        controls.add_widget(self.generate_btn)
-        
-        self.play_btn = Button(text='Play', size_hint_x=0.33, disabled=True)
-        self.play_btn.bind(on_press=self.play_music)
-        controls.add_widget(self.play_btn)
-        
-        self.download_btn = Button(text='Download MIDI', size_hint_x=0.33, disabled=True)
-        self.download_btn.bind(on_press=self.download_midi)
-        controls.add_widget(self.download_btn)
-        
-        main_layout.add_widget(controls)
-        
-        # Music parameters
-        params_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height=40)
-        params_layout.add_widget(Label(text='Key:', width=50, size_hint_x=None))
-        
-        self.key_input = TextInput(text='C', multiline=False, size_hint_x=0.5)
-        params_layout.add_widget(self.key_input)
-        
-        params_layout.add_widget(Label(text='Tempo:', width=60, size_hint_x=None))
-        self.tempo_input = TextInput(text='120', multiline=False, size_hint_x=0.5)
-        params_layout.add_widget(self.tempo_input)
-        
-        main_layout.add_widget(params_layout)
-        
-        # Status display
-        self.status_label = Label(text='Ready to generate music', 
-                                size_hint_y=None, height=30)
-        main_layout.add_widget(self.status_label)
+        # Status label
+        self.status_label = Label(text="Music21 Player - Ready", size_hint=(1, 0.1))
+        self.add_widget(self.status_label)
         
         # Piano roll display
-        piano_roll_container = BoxLayout(orientation='vertical')
-        piano_roll_container.add_widget(Label(text='Piano Roll View:', 
-                                            size_hint_y=None, height=30))
+        self.piano_roll = Image(size_hint=(1, 0.6))
+        self.add_widget(self.piano_roll)
         
-        self.piano_roll = PianoRollWidget()
-        piano_roll_container.add_widget(self.piano_roll)
-        main_layout.add_widget(piano_roll_container)
+        # Buttons layout
+        buttons_layout = BoxLayout(size_hint=(1, 0.2), spacing=10)
         
-        # Music info display
-        info_scroll = ScrollView(size_hint_y=0.3)
-        self.info_label = Label(text='Music information will appear here...',
-                              text_size=(None, None), halign='left', valign='top')
-        info_scroll.add_widget(self.info_label)
-        main_layout.add_widget(info_scroll)
+        self.load_btn = Button(text="Load MIDI")
+        self.load_btn.bind(on_press=self.show_file_chooser)
+        buttons_layout.add_widget(self.load_btn)
         
-        # Initialize
+        self.play_btn = Button(text="Play")
+        self.play_btn.bind(on_press=self.play_music)
+        buttons_layout.add_widget(self.play_btn)
+        
+        self.stop_btn = Button(text="Stop")
+        self.stop_btn.bind(on_press=self.stop_music)
+        buttons_layout.add_widget(self.stop_btn)
+        
+        self.download_btn = Button(text="Save MIDI")
+        self.download_btn.bind(on_press=self.save_midi)
+        buttons_layout.add_widget(self.download_btn)
+        
+        self.add_widget(buttons_layout)
+        
+        # File chooser (hidden initially)
+        self.file_chooser = FileChooserListView(size_hint=(1, 0.7), filters=['*.mid', '*.midi'])
+        self.file_chooser.bind(on_submit=self.load_midi_file)
+        self.file_chooser.opacity = 0
+        self.add_widget(self.file_chooser)
+        
+        # Audio and music21 objects
+        self.sound = None
         self.current_stream = None
-        self.midi_file_path = None
+        self.midi_filepath = None
         
-        if platform == 'android' and AUDIO_AVAILABLE:
-            request_permissions([Permission.WRITE_EXTERNAL_STORAGE, 
-                               Permission.READ_EXTERNAL_STORAGE])
+        # Set music21 environment for Android
+        if music21_available:
+            env = environment.Environment()
+            env['musicxmlPath'] = ''
+            env['musescoreDirectPNGPath'] = ''
+            env['lilypondPath'] = ''
         
-        return main_layout
-    
-    def generate_music(self, instance):
-        self.status_label.text = 'Generating music...'
-        threading.Thread(target=self._generate_music_thread).start()
-    
-    def _generate_music_thread(self):
+    def show_file_chooser(self, instance):
+        self.file_chooser.opacity = 1
+        
+    def load_midi_file(self, instance, selection, *args):
+        if not selection:
+            return
+            
+        self.file_chooser.opacity = 0
+        self.midi_filepath = selection[0]
+        
+        if not music21_available:
+            self.status_label.text = "Music21 not available - cannot load MIDI"
+            return
+            
         try:
-            # Create a new stream
-            s = stream.Stream()
+            self.current_stream = converter.parse(self.midi_filepath)
+            self.status_label.text = f"Loaded: {os.path.basename(self.midi_filepath)}"
+            self.update_piano_roll()
+        except Exception as e:
+            self.status_label.text = f"Error loading MIDI: {str(e)}"
+            Logger.error(f"Error loading MIDI: {str(e)}")
+    
+    def update_piano_roll(self):
+        if not self.current_stream or not music21_available:
+            return
             
-            # Set key and tempo
-            key_name = self.key_input.text or 'C'
-            tempo_val = int(self.tempo_input.text or '120')
+        try:
+            # Create piano roll plot
+            plot = PlotStream(self.current_stream)
+            plot.title = 'Piano Roll'
+            plot.process()
             
-            s.append(key.Key(key_name))
-            s.append(tempo.TempoIndication(number=tempo_val))
-            s.append(meter.TimeSignature('4/4'))
+            # Convert music21 plot to numpy array
+            fig = plot.getFigure()
+            fig.canvas.draw()
             
-            # Generate a simple melody using the key's scale
-            scale_obj = scale.MajorScale(key_name)
-            scale_notes = scale_obj.pitches
+            # Convert matplotlib figure to Kivy texture
+            buf = io.BytesIO()
+            fig.savefig(buf, format='rgba', dpi=100)
+            buf.seek(0)
+            img_array = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+            buf.close()
             
-            # Create a simple melody pattern
-            melody_notes = []
-            durations = [0.5, 1.0, 0.5, 1.0, 2.0, 1.0, 0.5, 0.5]
-            
-            for i in range(8):
-                pitch = scale_notes[i % len(scale_notes)]
-                dur = durations[i % len(durations)]
-                n = note.Note(pitch, quarterLength=dur)
-                melody_notes.append(n)
-                s.append(n)
-            
-            # Add some chords
-            chord_progression = ['I', 'V', 'vi', 'IV']
-            for chord_symbol in chord_progression:
-                c = chord.Chord(scale_obj.pitchFromDegree(1).name + chord_symbol,
-                               quarterLength=2.0)
-                s.append(c)
-            
-            self.current_stream = s
-            
-            # Extract notes data for piano roll
-            notes_data = []
-            current_time = 0
-            
-            for element in s.flat.notes:
-                if hasattr(element, 'pitch'):  # Single note
-                    notes_data.append({
-                        'pitch': element.pitch.midi,
-                        'start': current_time,
-                        'end': current_time + float(element.quarterLength)
-                    })
-                elif hasattr(element, 'pitches'):  # Chord
-                    for pitch in element.pitches:
-                        notes_data.append({
-                            'pitch': pitch.midi,
-                            'start': current_time,
-                            'end': current_time + float(element.quarterLength)
-                        })
-                current_time += float(element.quarterLength)
-            
-            # Update UI on main thread
-            Clock.schedule_once(lambda dt: self._update_ui_after_generation(notes_data))
+            # Reshape and create texture
+            w, h = fig.canvas.get_width_height()
+            img_array = img_array.reshape((h, w, 4))
+            texture = Texture.create(size=(w, h), colorfmt='rgba')
+            texture.blit_buffer(img_array.tobytes(), colorfmt='rgba', bufferfmt='ubyte')
+            self.piano_roll.texture = texture
             
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._show_error(str(e)))
-    
-    def _update_ui_after_generation(self, notes_data):
-        self.status_label.text = 'Music generated successfully!'
-        self.play_btn.disabled = False
-        self.download_btn.disabled = False
-        
-        # Update piano roll
-        self.piano_roll.set_notes(notes_data)
-        
-        # Update info display
-        if self.current_stream:
-            info_text = f"Generated music in {self.key_input.text} major\n"
-            info_text += f"Tempo: {self.tempo_input.text} BPM\n"
-            info_text += f"Number of notes: {len([n for n in self.current_stream.flat.notes])}\n"
-            info_text += f"Duration: {self.current_stream.duration.quarterLength} beats\n"
-            
-            # Update text size for wrapping
-            self.info_label.text_size = (400, None)
-            self.info_label.text = info_text
-    
-    def _show_error(self, error_msg):
-        self.status_label.text = f'Error: {error_msg}'
+            self.status_label.text = f"Error creating piano roll: {str(e)}"
+            Logger.error(f"Error creating piano roll: {str(e)}")
     
     def play_music(self, instance):
-        if not self.current_stream:
+        if not self.current_stream or not music21_available:
+            self.status_label.text = "No MIDI loaded or Music21 unavailable"
             return
-        
-        self.status_label.text = 'Playing music...'
-        threading.Thread(target=self._play_music_thread).start()
-    
-    def _play_music_thread(self):
+            
         try:
-            # Convert to MIDI and play
-            temp_dir = tempfile.gettempdir()
-            midi_path = os.path.join(temp_dir, 'temp_music.mid')
+            # Convert stream to MIDI and save temporarily
+            temp_path = os.path.join(os.getcwd(), 'temp.mid')
+            self.current_stream.write('midi', temp_path)
             
-            # Write MIDI file
-            mf = self.current_stream.write('midi', fp=midi_path)
-            
-            if platform == 'android' and AUDIO_AVAILABLE:
-                self._play_android(midi_path)
-            elif AUDIO_AVAILABLE:
-                self._play_desktop(midi_path)
+            # Play with Kivy's SoundLoader
+            if self.sound:
+                self.sound.stop()
+                self.sound.unload()
+                
+            self.sound = SoundLoader.load(temp_path)
+            if self.sound:
+                self.sound.play()
+                self.status_label.text = "Playing..."
             else:
-                Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', 
-                                                     'Audio playback not available'))
+                self.status_label.text = "Could not play MIDI"
                 
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._show_error(f"Playback error: {str(e)}"))
+            self.status_label.text = f"Error playing music: {str(e)}"
+            Logger.error(f"Error playing music: {str(e)}")
     
-    def _play_android(self, midi_path):
-        try:
-            media_player = MediaPlayer()
-            media_player.setDataSource(midi_path)
-            media_player.prepare()
-            media_player.start()
-            
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', 
-                                                 'Playing... (Android)'))
-        except Exception as e:
-            Clock.schedule_once(lambda dt: self._show_error(f"Android playback error: {str(e)}"))
+    def stop_music(self, instance):
+        if self.sound and self.sound.state == 'play':
+            self.sound.stop()
+            self.status_label.text = "Stopped playback"
     
-    def _play_desktop(self, midi_path):
-        try:
-            # Simple beep pattern for desktop (since pygame doesn't play MIDI directly)
-            for i in range(5):
-                pygame.mixer.Sound.play(pygame.mixer.Sound(
-                    buffer=b'\x00\x7f' * 1000))  # Simple tone
-                time.sleep(0.5)
-            
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', 
-                                                 'Playback complete'))
-        except Exception as e:
-            Clock.schedule_once(lambda dt: self._show_error(f"Desktop playback error: {str(e)}"))
-    
-    def download_midi(self, instance):
-        if not self.current_stream:
+    def save_midi(self, instance):
+        if not self.current_stream or not music21_available:
+            self.status_label.text = "No MIDI loaded or Music21 unavailable"
             return
-        
-        self.status_label.text = 'Downloading MIDI...'
-        threading.Thread(target=self._download_midi_thread).start()
-    
-    def _download_midi_thread(self):
+            
         try:
-            if platform == 'android':
-                # Save to Downloads folder on Android
-                downloads_dir = Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
-                midi_path = os.path.join(downloads_dir, 'generated_music.mid')
-            else:
-                # Save to current directory on desktop
-                midi_path = 'generated_music.mid'
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = os.path.join(os.getcwd(), f"composition_{timestamp}.mid")
             
-            # Write MIDI file
-            self.current_stream.write('midi', fp=midi_path)
-            self.midi_file_path = midi_path
-            
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', 
-                                                 f'MIDI saved to: {midi_path}'))
+            # Save MIDI file
+            self.current_stream.write('midi', save_path)
+            self.status_label.text = f"MIDI saved to: {save_path}"
             
         except Exception as e:
-            Clock.schedule_once(lambda dt: self._show_error(f"Download error: {str(e)}"))
+            self.status_label.text = f"Error saving MIDI: {str(e)}"
+            Logger.error(f"Error saving MIDI: {str(e)}")
 
+class Music21App(App):
+    def build(self):
+        return Music21Player()
 
 if __name__ == '__main__':
-    MusicApp().run()
+    Music21App().run()
