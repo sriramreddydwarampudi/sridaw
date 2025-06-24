@@ -6,7 +6,7 @@ log_level = 2
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 1.0
-requirements = python3,kivy==2.0.0,pygame_sdl2,music21,setuptools
+requirements = python3,kivy==2.0.0,music21,setuptools
 orientation = portrait
 osx.kivy_version = 2.3.0
 
