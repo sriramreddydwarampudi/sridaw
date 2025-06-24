@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SriDAW - Digital Audio Workstation
-A Kivy-based DAW with music21 integration, piano roll, and MIDI capabilities
+Updated with Android-compatible sound playback
 """
 
 import kivy
@@ -29,20 +29,22 @@ import os
 import threading
 import tempfile
 from pathlib import Path
+import math
+import array
 
 # Music21 imports
 try:
     from music21 import stream, note, pitch, duration, tempo, meter, key, scale
     from music21 import midi as music21_midi
-    from music21.midi import realtime as rt
     MUSIC21_AVAILABLE = True
 except ImportError:
     MUSIC21_AVAILABLE = False
     print("Warning: music21 not available. Install with: pip install music21")
 
-# Audio playback (optional, fallback to basic MIDI)
+# Audio playback
 try:
     import pygame
+    pygame.mixer.init()
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
@@ -68,9 +70,6 @@ class PianoRoll(Widget):
         self.grid_height = 15
         self.selected_note = None
         self.drawing = False
-        
-        # Bind events (remove old bindings)
-        # Events will be handled by the overridden methods
         
         # Draw initial grid
         Clock.schedule_once(lambda dt: self.draw_grid(), 0.1)
@@ -115,7 +114,7 @@ class PianoRoll(Widget):
         except Exception as e:
             print(f"Error drawing notes: {e}")
     
-    def on_touch_down(self, instance, touch):
+    def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
             # Convert touch position to grid coordinates
             grid_x = int((touch.pos[0] - self.x) // self.grid_width)
@@ -137,7 +136,7 @@ class PianoRoll(Widget):
             return True
         return False
     
-    def on_touch_move(self, instance, touch):
+    def on_touch_move(self, touch):
         if self.drawing and self.collide_point(*touch.pos):
             # Extend note duration while dragging
             if self.notes:
@@ -146,25 +145,19 @@ class PianoRoll(Widget):
                 last_note['duration'] = max(1, grid_x - last_note['time'])
                 self.draw_grid()
     
-    def on_touch_up(self, instance, touch):
+    def on_touch_up(self, touch):
         self.drawing = False
     
     def play_note_sound(self, grid_pitch):
         """Play sound for a note at given grid pitch"""
         try:
-            if MUSIC21_AVAILABLE:
-                # Convert grid pitch to MIDI note
-                midi_note = 60 + (grid_pitch - 20)  # C4 = 60
-                midi_note = max(21, min(127, midi_note))  # Clamp to valid MIDI range
-                
-                # Create and play note
-                n = note.Note(midi=midi_note)
-                n.quarterLength = 0.5
-                s = stream.Stream()
-                s.append(n)
-                
-                # Quick playback
-                self.parent.parent.parent.parent.play_stream_quick(s)
+            # Convert grid pitch to MIDI note
+            midi_note = 60 + (grid_pitch - 20)  # C4 = 60
+            midi_note = max(21, min(127, midi_note))  # Clamp to valid MIDI range
+            
+            # Play using app's sample player
+            app = App.get_running_app()
+            app.play_note_sample(midi_note)
         except Exception as e:
             print(f"Error playing note: {e}")
     
@@ -322,7 +315,7 @@ result = create_melody_with_chords()
             self.text = "# SriDAW Code Editor\n# Ready for music21 code"
 
 class SriDAWApp(App):
-    """Main application class"""
+    """Main application class with audio fixes"""
     
     def build(self):
         self.title = "SriDAW - Digital Audio Workstation"
@@ -445,19 +438,47 @@ class SriDAWApp(App):
         return main_layout
     
     def init_audio(self):
-        """Initialize audio system"""
-        if PYGAME_AVAILABLE:
-            try:
-                pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
-                self.update_status("Audio initialized (pygame)")
-            except:
-                self.update_status("Audio initialization failed")
-        else:
-            self.update_status("Audio not available - install pygame")
+        """Initialize audio system with sine wave generator"""
+        self.note_samples = {}  # Cache for generated notes
+        self.update_status("Audio initialized (sine wave generator)")
     
     def update_status(self, message):
         """Update status bar"""
         self.status_label.text = f"Status: {message}"
+    
+    def midi_to_freq(self, midi_note):
+        """Convert MIDI note number to frequency"""
+        return 440.0 * (2.0 ** ((midi_note - 69) / 12.0))
+    
+    def generate_sine_wave(self, freq, duration=0.5, sample_rate=44100, volume=0.5):
+        """Generate a sine wave for audio playback"""
+        num_samples = int(sample_rate * duration)
+        samples = array.array('h', (0 for _ in range(num_samples)))
+        
+        for i in range(num_samples):
+            t = float(i) / sample_rate
+            sample_val = int(volume * 32767.0 * math.sin(2 * math.pi * freq * t))
+            samples[i] = sample_val
+        
+        return samples
+    
+    def play_note_sample(self, midi_note):
+        """Play a generated sine wave note"""
+        try:
+            if not PYGAME_AVAILABLE:
+                return
+                
+            # Generate or use cached sample
+            if midi_note not in self.note_samples:
+                freq = self.midi_to_freq(midi_note)
+                wave_data = self.generate_sine_wave(freq)
+                self.note_samples[midi_note] = wave_data
+            
+            # Create pygame Sound object
+            sound = pygame.mixer.Sound(buffer=bytes(self.note_samples[midi_note]))
+            sound.play()
+        except Exception as e:
+            print(f"Error playing note sample: {e}")
     
     def play_piano_key(self, button):
         """Play individual piano key"""
@@ -475,15 +496,9 @@ class SriDAWApp(App):
         
         if MUSIC21_AVAILABLE:
             try:
-                # Create and play single note with better sound
-                n = note.Note(note_name, quarterLength=1)
-                n.volume.velocity = 80
-                s = stream.Stream()
-                s.append(tempo.TempoIndication(number=120))
-                s.append(n)
-                
-                # Use threading to avoid blocking UI
-                self.play_stream_quick(s)
+                # Convert note name to MIDI
+                p = pitch.Pitch(note_name)
+                self.play_note_sample(p.midi)
             except Exception as e:
                 self.update_status(f"Error playing note: {e}")
     
@@ -512,70 +527,35 @@ class SriDAWApp(App):
     def play_stream_threaded(self, stream_obj):
         """Play music21 stream in separate thread"""
         try:
-            if MUSIC21_AVAILABLE:
-                # Try to use music21's built-in playback
-                try:
-                    # Create temporary MIDI file for playback
-                    temp_dir = tempfile.gettempdir()
-                    temp_file = os.path.join(temp_dir, "sridaw_temp.mid")
-                    
-                    # Write MIDI file
-                    stream_obj.write('midi', fp=temp_file)
-                    
-                    # Play using pygame if available
-                    if PYGAME_AVAILABLE:
-                        pygame.mixer.music.load(temp_file)
-                        pygame.mixer.music.play()
-                        
-                        # Wait for playback to finish
-                        while pygame.mixer.music.get_busy():
-                            pygame.time.wait(100)
-                    
-                    # Clean up
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                        
-                except Exception as e:
-                    print(f"Playback error: {e}")
-                    
+            if not MUSIC21_AVAILABLE:
+                return
+                
+            # Create temporary MIDI file for playback
+            temp_dir = tempfile.gettempdir()
+            temp_file = os.path.join(temp_dir, "sridaw_temp.mid")
+            
+            # Write MIDI file
+            stream_obj.write('midi', fp=temp_file)
+            
+            # Play using pygame if available
+            if PYGAME_AVAILABLE:
+                pygame.mixer.music.load(temp_file)
+                pygame.mixer.music.play()
+                
+                # Wait for playback to finish
+                while pygame.mixer.music.get_busy() and self.is_playing:
+                    pygame.time.delay(100)
+            
+            # Clean up
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                
         except Exception as e:
-            print(f"Stream playback error: {e}")
+            print(f"Playback error: {e}")
+            self.update_status(f"Playback error: {e}")
         finally:
             # Reset play state
             Clock.schedule_once(self.reset_play_state, 0)
-    
-    def play_stream_quick(self, stream_obj):
-        """Quick playback for single notes"""
-        try:
-            if PYGAME_AVAILABLE and stream_obj:
-                # Create temporary MIDI file for quick playback
-                temp_dir = tempfile.gettempdir()
-                temp_file = os.path.join(temp_dir, f"sridaw_quick_{id(stream_obj)}.mid")
-                
-                # Write and play MIDI file
-                stream_obj.write('midi', fp=temp_file)
-                
-                # Non-blocking playback
-                def play_quick():
-                    try:
-                        pygame.mixer.music.load(temp_file)
-                        pygame.mixer.music.play(loops=0)
-                        # Clean up after a short delay
-                        Clock.schedule_once(lambda dt: self.cleanup_temp_file(temp_file), 2)
-                    except Exception as e:
-                        print(f"Quick playback error: {e}")
-                
-                threading.Thread(target=play_quick, daemon=True).start()
-        except Exception as e:
-            print(f"Stream quick play error: {e}")
-    
-    def cleanup_temp_file(self, filepath):
-        """Clean up temporary files"""
-        try:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-        except Exception as e:
-            print(f"Cleanup error: {e}")
     
     def play_demo(self, button):
         """Play a demo composition"""
