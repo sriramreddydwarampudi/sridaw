@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SriDAW - Digital Audio Workstation
-Updated with Android-compatible sound playback
+A Kivy-based DAW with music21 integration, piano roll, and MIDI capabilities
 """
 
 import kivy
@@ -24,13 +24,15 @@ from kivy.core.window import Window
 from kivy.uix.scrollview import ScrollView
 from kivy.event import EventDispatcher
 from kivy.properties import NumericProperty, StringProperty, BooleanProperty
+from kivy.core.audio import SoundLoader
 
 import os
 import threading
 import tempfile
-from pathlib import Path
 import math
-import array
+import wave
+import struct
+from pathlib import Path
 
 # Music21 imports
 try:
@@ -40,15 +42,6 @@ try:
 except ImportError:
     MUSIC21_AVAILABLE = False
     print("Warning: music21 not available. Install with: pip install music21")
-
-# Audio playback
-try:
-    import pygame
-    pygame.mixer.init()
-    PYGAME_AVAILABLE = True
-except ImportError:
-    PYGAME_AVAILABLE = False
-    print("Warning: pygame not available for audio. Install with: pip install pygame")
 
 class PianoKey(Button):
     """Individual piano key widget"""
@@ -315,7 +308,7 @@ result = create_melody_with_chords()
             self.text = "# SriDAW Code Editor\n# Ready for music21 code"
 
 class SriDAWApp(App):
-    """Main application class with audio fixes"""
+    """Main application class"""
     
     def build(self):
         self.title = "SriDAW - Digital Audio Workstation"
@@ -438,47 +431,58 @@ class SriDAWApp(App):
         return main_layout
     
     def init_audio(self):
-        """Initialize audio system with sine wave generator"""
-        self.note_samples = {}  # Cache for generated notes
+        """Initialize audio system"""
+        # Create cache directory for WAV files
+        self.cache_dir = self.user_data_dir
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
         self.update_status("Audio initialized (sine wave generator)")
-    
-    def update_status(self, message):
-        """Update status bar"""
-        self.status_label.text = f"Status: {message}"
     
     def midi_to_freq(self, midi_note):
         """Convert MIDI note number to frequency"""
         return 440.0 * (2.0 ** ((midi_note - 69) / 12.0))
     
-    def generate_sine_wave(self, freq, duration=0.5, sample_rate=44100, volume=0.5):
-        """Generate a sine wave for audio playback"""
+    def generate_wav(self, freq, filename, duration=0.5, sample_rate=44100):
+        """Generate a WAV file for a sine wave of the given frequency"""
+        # Generate the sine wave data
         num_samples = int(sample_rate * duration)
-        samples = array.array('h', (0 for _ in range(num_samples)))
-        
-        for i in range(num_samples):
-            t = float(i) / sample_rate
-            sample_val = int(volume * 32767.0 * math.sin(2 * math.pi * freq * t))
-            samples[i] = sample_val
-        
-        return samples
+        # Open the WAV file
+        with wave.open(filename, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # mono
+            wav_file.setsampwidth(2)   # 2 bytes (16 bits) per sample
+            wav_file.setframerate(sample_rate)
+            # Generate the samples
+            for i in range(num_samples):
+                t = float(i) / sample_rate
+                # Generate a sine wave at the given frequency
+                sample_val = int(32767.0 * math.sin(2 * math.pi * freq * t))
+                # Pack the sample as a short (16-bit) in little-endian
+                wav_file.writeframesraw(struct.pack('<h', sample_val))
     
     def play_note_sample(self, midi_note):
-        """Play a generated sine wave note"""
+        """Play a note using Kivy's SoundLoader, generating the WAV if needed"""
         try:
-            if not PYGAME_AVAILABLE:
-                return
-                
-            # Generate or use cached sample
-            if midi_note not in self.note_samples:
-                freq = self.midi_to_freq(midi_note)
-                wave_data = self.generate_sine_wave(freq)
-                self.note_samples[midi_note] = wave_data
+            # Convert MIDI note to frequency
+            freq = self.midi_to_freq(midi_note)
+            # The filename for this note
+            filename = os.path.join(self.cache_dir, f"note_{midi_note}.wav")
             
-            # Create pygame Sound object
-            sound = pygame.mixer.Sound(buffer=bytes(self.note_samples[midi_note]))
-            sound.play()
+            # If the WAV file doesn't exist, generate it
+            if not os.path.exists(filename):
+                self.generate_wav(freq, filename)
+            
+            # Load the sound
+            sound = SoundLoader.load(filename)
+            if sound:
+                sound.play()
+            else:
+                print(f"Failed to load sound: {filename}")
         except Exception as e:
             print(f"Error playing note sample: {e}")
+    
+    def update_status(self, message):
+        """Update status bar"""
+        self.status_label.text = f"Status: {message}"
     
     def play_piano_key(self, button):
         """Play individual piano key"""
@@ -537,19 +541,22 @@ class SriDAWApp(App):
             # Write MIDI file
             stream_obj.write('midi', fp=temp_file)
             
-            # Play using pygame if available
-            if PYGAME_AVAILABLE:
-                pygame.mixer.music.load(temp_file)
-                pygame.mixer.music.play()
+            # We'll play each note individually (simplified version)
+            self.update_status("Playing composition...")
+            for element in stream_obj.flatten().notes:
+                if isinstance(element, note.Note):
+                    self.play_note_sample(element.pitch.midi)
+                    # Wait for note duration
+                    time.sleep(element.duration.quarterLength * 0.25)
+                elif isinstance(element, chord.Chord):
+                    for p in element.pitches:
+                        self.play_note_sample(p.midi)
+                    time.sleep(element.duration.quarterLength * 0.25)
                 
-                # Wait for playback to finish
-                while pygame.mixer.music.get_busy() and self.is_playing:
-                    pygame.time.delay(100)
-            
-            # Clean up
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-                
+                # Check if we should stop
+                if not self.is_playing:
+                    break
+                    
         except Exception as e:
             print(f"Playback error: {e}")
             self.update_status(f"Playback error: {e}")
@@ -559,51 +566,13 @@ class SriDAWApp(App):
     
     def play_demo(self, button):
         """Play a demo composition"""
+        self.update_status("Playing demo...")
         try:
-            if MUSIC21_AVAILABLE:
-                # Create a nice demo composition
-                s = stream.Stream()
-                s.append(tempo.TempoIndication(number=120))
-                s.append(meter.TimeSignature('4/4'))
-                s.append(key.KeySignature(0))  # C major
-                
-                # Melody: Twinkle Twinkle Little Star
-                melody = [
-                    ('C4', 1), ('C4', 1), ('G4', 1), ('G4', 1),
-                    ('A4', 1), ('A4', 1), ('G4', 2),
-                    ('F4', 1), ('F4', 1), ('E4', 1), ('E4', 1),
-                    ('D4', 1), ('D4', 1), ('C4', 2)
-                ]
-                
-                offset = 0
-                for note_name, dur in melody:
-                    n = note.Note(note_name, quarterLength=dur)
-                    n.volume.velocity = 70
-                    n.offset = offset
-                    offset += dur
-                    s.append(n)
-                
-                # Add some harmony
-                harmony_notes = [
-                    ('C3', 4, 0), ('F3', 4, 4), ('G3', 4, 8), ('C3', 4, 12)
-                ]
-                
-                for note_name, dur, offset_time in harmony_notes:
-                    n = note.Note(note_name, quarterLength=dur)
-                    n.volume.velocity = 50
-                    n.offset = offset_time
-                    s.append(n)
-                
-                self.current_stream = s
-                self.update_status("Playing demo composition...")
-                
-                # Play the demo
-                if not self.is_playing:
-                    self.is_playing = True
-                    self.play_btn.text = '⏸ Pause'
-                    threading.Thread(target=self.play_stream_threaded, args=(s,)).start()
-            else:
-                self.update_status("Music21 not available for demo")
+            # Play a simple scale
+            for midi_note in range(60, 73):  # C4 to C5
+                self.play_note_sample(midi_note)
+                # Short delay between notes
+                time.sleep(0.2)
         except Exception as e:
             self.update_status(f"Demo error: {e}")
     
@@ -615,9 +584,6 @@ class SriDAWApp(App):
     
     def stop_music(self, button):
         """Stop music playback"""
-        if PYGAME_AVAILABLE:
-            pygame.mixer.music.stop()
-        
         self.is_playing = False
         self.play_btn.text = '▶ Play'
         self.update_status("Stopped")
@@ -755,12 +721,11 @@ class SriDAWApp(App):
             self.update_status(f"Export error: {e}")
 
 if __name__ == '__main__':
+    import time
+    
     # Check dependencies
     if not MUSIC21_AVAILABLE:
         print("Warning: music21 not available. Install with: pip install music21")
-    
-    if not PYGAME_AVAILABLE:
-        print("Warning: pygame not available. Install with: pip install pygame")
     
     # Run the app
     SriDAWApp().run()
