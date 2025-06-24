@@ -35,7 +35,7 @@ version = 0.1
 # version.filename = %(source.dir)s/main.py
 
 # (list) Application requirements
-requirements = python3,kivy==2.0.0,pygame,music21,setuptools
+requirements = python3==3.10.*,kivy==2.0.0,pygame,music21,setuptools
 
 # (str) Custom source folders for requirements
 # Sets source directory for any requirements with recipes
