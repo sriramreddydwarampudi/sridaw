@@ -1,35 +1,16 @@
 [app]
-title = sridaw
+title = SriDAW
 package.name = sridaw
-package.domain = org.example
-log_level = 2
+package.domain = org.sridaw
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
-version = 1.0
-requirements = python3,kivy==2.0.0,music21,setuptools
-orientation = portrait
-osx.kivy_version = 2.3.0
-
-[buildozer]
-log_level = 2
-warn_on_root = 1
-
-[app.android]
-# Optional: uncomment to fix version
+version = 0.1
+requirements = python3==3.9.9,kivy==2.0.0,music21,setuptools,android
+android.permissions = INTERNET, WRITE_EXTERNAL_STORAGE, READ_EXTERNAL_STORAGE
+android.arch = armeabi-v7a
+orientation = landscape
+p4a.branch = master
 android.api = 30
 android.minapi = 21
-android.ndk = 25b
-android.gradle_dependencies = 
 android.sdk = 24
-# Optional: increase if needed
-android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET
-android.add_libs_armeabi_v7a = libfluidsynth.so
-# Optional: uncomment if your app needs to stay awake, etc.
-# android.permissions = INTERNET,WAKE_LOCK
-
-# Optional: if using Java modules
-# android.add_jars = libs/my-lib.jar
-
-# Optional: icon and presplash
-# icon.filename = %(source.dir)s/icon.png
-# presplash.filename = %(source.dir)s/splash.png
+android.ndk = 19c
+android.gradle_dependencies = 'com.android.support:multidex:1.0.3'
