@@ -1,21 +1,21 @@
 [app]
-title = SriDAW
-package.name = sridaw
-package.domain = org.sridaw
+title = MIDI Piano Roll
+package.name = miditools
+package.domain = org.midi
 source.dir = .
-source.include_exts = py,kv,wav,mp3
-version = 0.1
-requirements = python3,kivy==2.0.0,setuptools
-orientation = landscape
+source.include_exts = py,png,npy,ogg,mid
+source.include_dirs = corpus
+requirements = 
+    python3,
+    kivy,
+    music21,
+    mido,
+    matplotlib,
+    numpy
+
+android.permissions = 
+android.arch = arm64-v8a
+p4a.branch = develop
 
 [buildozer]
 log_level = 2
-warn_on_root = 1
-
-[app.android]
-android.api = 30
-android.minapi = 21
-android.sdk = 24
-android.ndk = 21d
-android.permissions = INTERNET,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-android.arch = armeabi-v7a
