@@ -1,35 +1,22 @@
 [app]
-title = sridaw
+title = SriDAW
 package.name = sridaw
 package.domain = org.example
-log_level = 2
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas
+source.include_exts = py,png,jpg,kv,atlas,mid
 version = 1.0
-requirements = python3,kivy,music21,numpy,matplotlib,jnius
 orientation = portrait
-osx.kivy_version = 2.3.0
+fullscreen = 1
+
+# Main entry file
+entrypoint = sridaw_final_fixed.py
+
+# Requirements
+requirements = python3,kivy,music21,pygame
+
+# Optional: Reduce size by stripping music21 if needed
+# requirements = python3,kivy,pygame
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
-
-[app.android]
-# Optional: uncomment to fix version
-android.api = 30
-android.minapi = 21
-android.ndk = 25b
-android.gradle_dependencies = 
-android.sdk = 24
-# Optional: increase if needed
-android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET
-android.add_libs_armeabi_v7a = libfluidsynth.so
-# Optional: uncomment if your app needs to stay awake, etc.
-# android.permissions = INTERNET,WAKE_LOCK
-
-# Optional: if using Java modules
-# android.add_jars = libs/my-lib.jar
-
-# Optional: icon and presplash
-# icon.filename = %(source.dir)s/icon.png
-# presplash.filename = %(source.dir)s/splash.png
