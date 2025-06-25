@@ -6,6 +6,7 @@ version = 1.0
 source.dir = .
 source.include_exts = py,png,npy,ogg,mid
 source.include_dirs = corpus
+
 requirements = 
     python3,
     kivy,
@@ -15,8 +16,7 @@ requirements =
     numpy
 
 android.permissions = 
-android.arch = arm64-v8a
-p4a.branch = develop
+android.archs = arm64-v8a  # ✅ Updated
 
 [buildozer]
 log_level = 2
