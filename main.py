@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SriDAW - Digital Audio Workstation
-Updated with Android-compatible sound playback
+A Kivy-based DAW with music21 integration, piano roll, and MIDI capabilities
 """
 
 import kivy
@@ -29,22 +29,20 @@ import os
 import threading
 import tempfile
 from pathlib import Path
-import math
-import array
 
 # Music21 imports
 try:
     from music21 import stream, note, pitch, duration, tempo, meter, key, scale
     from music21 import midi as music21_midi
+    from music21.midi import realtime as rt
     MUSIC21_AVAILABLE = True
 except ImportError:
     MUSIC21_AVAILABLE = False
     print("Warning: music21 not available. Install with: pip install music21")
 
-# Audio playback
+# Audio playback (optional, fallback to basic MIDI)
 try:
     import pygame
-    pygame.mixer.init()
     PYGAME_AVAILABLE = True
 except ImportError:
     PYGAME_AVAILABLE = False
@@ -70,6 +68,9 @@ class PianoRoll(Widget):
         self.grid_height = 15
         self.selected_note = None
         self.drawing = False
+        
+        # Bind events (remove old bindings)
+        # Events will be handled by the overridden methods
         
         # Draw initial grid
         Clock.schedule_once(lambda dt: self.draw_grid(), 0.1)
@@ -114,7 +115,7 @@ class PianoRoll(Widget):
         except Exception as e:
             print(f"Error drawing notes: {e}")
     
-    def on_touch_down(self, touch):
+    def on_touch_down(self, instance, touch):
         if self.collide_point(*touch.pos):
             # Convert touch position to grid coordinates
             grid_x = int((touch.pos[0] - self.x) // self.grid_width)
@@ -136,7 +137,7 @@ class PianoRoll(Widget):
             return True
         return False
     
-    def on_touch_move(self, touch):
+    def on_touch_move(self, instance, touch):
         if self.drawing and self.collide_point(*touch.pos):
             # Extend note duration while dragging
             if self.notes:
@@ -145,19 +146,25 @@ class PianoRoll(Widget):
                 last_note['duration'] = max(1, grid_x - last_note['time'])
                 self.draw_grid()
     
-    def on_touch_up(self, touch):
+    def on_touch_up(self, instance, touch):
         self.drawing = False
     
     def play_note_sound(self, grid_pitch):
         """Play sound for a note at given grid pitch"""
         try:
-            # Convert grid pitch to MIDI note
-            midi_note = 60 + (grid_pitch - 20)  # C4 = 60
-            midi_note = max(21, min(127, midi_note))  # Clamp to valid MIDI range
-            
-            # Play using app's sample player
-            app = App.get_running_app()
-            app.play_note_sample(midi_note)
+            if MUSIC21_AVAILABLE:
+                # Convert grid pitch to MIDI note
+                midi_note = 60 + (grid_pitch - 20)  # C4 = 60
+                midi_note = max(21, min(127, midi_note))  # Clamp to valid MIDI range
+                
+                # Create and play note
+                n = note.Note(midi=midi_note)
+                n.quarterLength = 0.5
+                s = stream.Stream()
+                s.append(n)
+                
+                # Quick playback
+                self.parent.parent.parent.parent.play_stream_quick(s)
         except Exception as e:
             print(f"Error playing note: {e}")
     
@@ -193,28 +200,268 @@ class PianoRoll(Widget):
         
         return s
 
+
 class CodeEditor(TextInput):
-    """Code editor with syntax highlighting (basic)"""
+    """Enhanced code editor with music21 syntax highlighting and autocompletion"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.multiline = True
         self.background_color = (0.1, 0.1, 0.1, 1)
         self.foreground_color = (1, 1, 1, 1)
+        self.font_name = 'Courier'  # Monospace font for code
+        self.font_size = 14
+        self.cursor_color = (1, 1, 1, 1)
+        self.hint_text = "Write your music21 code here..."
+        
+        # Syntax highlighting colors
+        self.keyword_color = (0.8, 0.2, 0.6, 1)    # Pink
+        self.string_color = (0.2, 0.8, 0.2, 1)       # Green
+        self.comment_color = (0.5, 0.5, 0.5, 1)      # Gray
+        self.function_color = (0.4, 0.6, 1.0, 1)     # Blue
+        self.class_color = (0.8, 0.6, 0.2, 1)        # Orange
+        self.constant_color = (0.8, 0.8, 0.2, 1)     # Yellow
+        
+        # Music21 specific keywords and functions
+        self.music21_keywords = [
+            'stream', 'note', 'pitch', 'duration', 'tempo', 'meter', 
+            'key', 'scale', 'chord', 'interval', 'clef', 'articulations',
+            'dynamics', 'instrument', 'midi', 'realtime', 'environment',
+            'corpus', 'common', 'configure', 'analysis', 'graph'
+        ]
+        
+        self.python_keywords = [
+            'def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while',
+            'break', 'continue', 'import', 'from', 'as', 'try', 'except',
+            'finally', 'with', 'lambda', 'yield', 'None', 'True', 'False'
+        ]
+        
+        # Setup autocompletion
+        self.completion_list = self._build_completion_list()
+        self.completion_popup = None
+        self.completion_start = 0
+        self.completion_end = 0
+        
+        # Bind events
+        self.bind(text=self.on_text)
+        self.bind(focus=self.on_focus)
+        
         # Set initial text after widget is ready
         Clock.schedule_once(self.set_initial_text, 0.1)
     
+    def _build_completion_list(self):
+        """Build the autocompletion list with music21-specific items"""
+        base_list = self.python_keywords + self.music21_keywords
+        
+        # Add music21 class methods and properties
+        if MUSIC21_AVAILABLE:
+            music21_classes = {
+                'stream.Stream': ['append', 'insert', 'measure', 'show', 'write', 
+                                'flat', 'notes', 'parts', 'recurse', 'transpose'],
+                'note.Note': ['pitch', 'duration', 'offset', 'volume', 'articulations',
+                             'lyric', 'tie', 'name', 'octave', 'midi'],
+                'chord.Chord': ['pitches', 'root', 'bass', 'inversion', 'isMajorTriad',
+                               'isMinorTriad', 'isDiminishedTriad', 'isAugmentedTriad'],
+                'scale.Scale': ['getPitches', 'derive', 'getTonic', 'getDominant']
+            }
+            
+            for cls, methods in music21_classes.items():
+                base_list.extend([f"{cls}.{m}" for m in methods])
+        
+        return sorted(list(set(base_list)))
+    
+    def on_text(self, instance, value):
+        """Triggered when text changes - handles syntax highlighting"""
+        self._highlight_syntax()
+        
+        # Show completion popup when typing
+        if self.focus and len(self.text) > 0:
+            self._update_completion()
+    
+    def on_focus(self, instance, value):
+        """Handle focus changes"""
+        if value:  # Got focus
+            self._highlight_syntax()
+            self._update_completion()
+        else:      # Lost focus
+            if self.completion_popup:
+                self.completion_popup.dismiss()
+                self.completion_popup = None
+    
+    def _highlight_syntax(self):
+        """Apply syntax highlighting to the code"""
+        try:
+            # Get the text and clear previous highlighting
+            text = self.text
+            self._clear_highlighting()
+            
+            # Highlight Python and music21 keywords
+            for word in self.python_keywords + self.music21_keywords:
+                self._highlight_word(word, self.keyword_color)
+            
+            # Highlight strings
+            self._highlight_pattern(r'(\'[^\']*\'|\"[^\"]*\")', self.string_color)
+            
+            # Highlight comments
+            self._highlight_pattern(r'#[^\n]*', self.comment_color)
+            
+            # Highlight function definitions
+            self._highlight_pattern(r'def\s+(\w+)', self.function_color, group=1)
+            
+            # Highlight class definitions
+            self._highlight_pattern(r'class\s+(\w+)', self.class_color, group=1)
+            
+        except Exception as e:
+            print(f"Syntax highlighting error: {e}")
+    
+    def _clear_highlighting(self):
+        """Clear all syntax highlighting"""
+        if hasattr(self, '_highlight_rectangles'):
+            for rect in self._highlight_rectangles:
+                self.canvas.before.remove(rect)
+            del self._highlight_rectangles
+        self._highlight_rectangles = []
+    
+    def _highlight_word(self, word, color):
+        """Highlight all occurrences of a specific word"""
+        text = self.text
+        start_idx = 0
+        word_len = len(word)
+        
+        while True:
+            idx = text.find(word, start_idx)
+            if idx == -1:
+                break
+                
+            # Check if it's a whole word (not part of another word)
+            if (idx == 0 or not text[idx-1].isalnum()) and \
+               (idx + word_len >= len(text) or not text[idx + word_len].isalnum()):
+                self._highlight_range(idx, idx + word_len, color)
+                
+            start_idx = idx + word_len
+    
+    def _highlight_pattern(self, pattern, color, group=0):
+        """Highlight text matching a regex pattern"""
+        import re
+        text = self.text
+        for match in re.finditer(pattern, text):
+            start, end = match.span(group)
+            self._highlight_range(start, end, color)
+    
+    def _highlight_range(self, start, end, color):
+        """Highlight a specific range of text"""
+        # Get line information
+        lines = self.text.split('\n')
+        line_start = 0
+        for line in lines:
+            line_end = line_start + len(line)
+            if start < line_end:
+                break
+            line_start = line_end + 1  # +1 for the newline
+        
+        # Calculate positions
+        x, y = self.get_cursor_from_index(start)
+        x2, y2 = self.get_cursor_from_index(end)
+        
+        # Create highlight rectangle
+        with self.canvas.before:
+            Color(*color)
+            rect = Rectangle(
+                pos=(self.x + x, self.y + y),
+                size=(x2 - x, self.line_height)
+            )
+            self._highlight_rectangles.append(rect)
+    
+    def _update_completion(self):
+        """Update the autocompletion popup"""
+        # Get current word
+        text = self.text[:self.cursor_index()]
+        if not text:
+            return
+            
+        # Find the start of the current word
+        start = max(text.rfind(' '), text.rfind('\n'), text.rfind('('), 
+                text.rfind('.'), text.rfind('[')) + 1
+        current_word = text[start:]
+        
+        # Filter completion list
+        matches = [w for w in self.completion_list if w.startswith(current_word)]
+        
+        if matches and current_word:
+            self.completion_start = start
+            self.completion_end = self.cursor_index()
+            self._show_completion_popup(matches)
+        elif self.completion_popup:
+            self.completion_popup.dismiss()
+            self.completion_popup = None
+    
+    def _show_completion_popup(self, items):
+        """Show the autocompletion popup"""
+        if self.completion_popup:
+            self.completion_popup.dismiss()
+        
+        # Create popup content
+        content = GridLayout(cols=1, spacing=5, size_hint_y=None)
+        content.bind(minimum_height=content.setter('height'))
+        
+        # Add completion items
+        for item in items[:10]:  # Limit to 10 items
+            btn = Button(text=item, size_hint_y=None, height=30)
+            btn.bind(on_press=lambda btn: self._apply_completion(btn.text))
+            content.add_widget(btn)
+        
+        # Create and open popup
+        popup = Popup(content=content, size_hint=(0.3, 0.4),
+                     pos_hint={'x': 0.1, 'top': 0.9})
+        self.completion_popup = popup
+        popup.open()
+    
+    def _apply_completion(self, text):
+        """Apply the selected completion"""
+        if self.completion_popup:
+            self.completion_popup.dismiss()
+            self.completion_popup = None
+            
+        # Replace current word with completion
+        current_text = self.text
+        new_text = (current_text[:self.completion_start] + 
+                   text + 
+                   current_text[self.completion_end:])
+        self.text = new_text
+        
+        # Move cursor to end of inserted text
+        self.cursor = (self.completion_start + len(text), self.cursor[1])
+    
+    def keyboard_on_key_down(self, window, keycode, text, modifiers):
+        """Handle keyboard events for autocompletion"""
+        # Tab key completes the first suggestion
+        if keycode[1] == 'tab' and self.completion_popup:
+            if self.completion_popup.content.children:
+                first_item = self.completion_popup.content.children[-1].text
+                self._apply_completion(first_item)
+            return True
+        
+        # Enter key confirms completion if popup is open
+        if keycode[1] == 'enter' and self.completion_popup:
+            return True
+            
+        # Arrow keys navigate completion popup
+        if keycode[1] in ('up', 'down') and self.completion_popup:
+            return True
+            
+        return super().keyboard_on_key_down(window, keycode, text, modifiers)
+    
     def set_initial_text(self, dt):
-        """Set initial text content"""
-        initial_code = """# SriDAW Music21 Code Editor - Sound Examples
+        """Set initial text content with improved examples"""
+        initial_code = """# SriDAW Music21 Code Editor
 # Create rich musical compositions with harmony and rhythm
 
-from music21 import stream, note, pitch, scale, tempo, meter, key
-from music21 import chord, duration, interval
+from music21 import *
 
 # Example 1: Simple Melody with Chords
 def create_melody_with_chords():
+    \"\"\"Create a melody with chord accompaniment\"\"\"
     s = stream.Stream()
-    s.append(tempo.TempoIndication(number=120))
+    s.append(tempo.MetronomeMark(number=120))
     s.append(meter.TimeSignature('4/4'))
     s.append(key.KeySignature(0))  # C major
     
@@ -227,75 +474,77 @@ def create_melody_with_chords():
         n.offset = sum(durations[:i])
         s.append(n)
     
-    # Add bass line
-    bass_notes = ['C2', 'G2', 'C2', 'F2']
-    for i, bass_note in enumerate(bass_notes):
-        n = note.Note(bass_note, quarterLength=1)
-        n.offset = i * 1
-        s.append(n)
-    
-    return s
-
-# Example 2: Chord Progression
-def create_chord_progression():
-    s = stream.Stream()
-    s.append(tempo.TempoIndication(number=100))
-    
-    # I-vi-IV-V progression in C major
+    # Add simple chord accompaniment
     chords = [
-        chord.Chord(['C4', 'E4', 'G4']),  # C major
-        chord.Chord(['A3', 'C4', 'E4']),  # A minor
-        chord.Chord(['F3', 'A3', 'C4']),  # F major
-        chord.Chord(['G3', 'B3', 'D4'])   # G major
+        chord.Chord(['C3', 'E3', 'G3'], quarterLength=2),
+        chord.Chord(['F3', 'A3', 'C4'], quarterLength=2),
+        chord.Chord(['G3', 'B3', 'D4'], quarterLength=2),
+        chord.Chord(['C3', 'E3', 'G3'], quarterLength=2)
     ]
     
     for i, c in enumerate(chords):
-        c.quarterLength = 2
         c.offset = i * 2
         s.append(c)
     
     return s
 
-# Example 3: Scale-based Melody
-def create_scale_melody():
+# Example 2: Scale-based Melody with Dynamics
+def create_scaled_melody():
+    \"\"\"Create a melody from a scale with dynamic shaping\"\"\"
     s = stream.Stream()
-    s.append(tempo.TempoIndication(number=140))
+    s.append(tempo.MetronomeMark(number=100))
     
-    # Create C major scale
-    c_major = scale.MajorScale('C4')
-    scale_notes = c_major.pitches
+    # Create D minor scale
+    d_minor = scale.MinorScale('D4')
+    scale_notes = d_minor.getPitches('D4', 'D5')
     
-    # Ascending and descending
-    for i, p in enumerate(scale_notes[:8]):  # One octave up
+    # Create melody with crescendo
+    for i, p in enumerate(scale_notes):
         n = note.Note(p, quarterLength=0.5)
         n.offset = i * 0.5
+        n.volume.velocity = 60 + (i * 5)  # Crescendo
         s.append(n)
     
-    for i, p in enumerate(reversed(scale_notes[:8])):  # One octave down
-        n = note.Note(p, quarterLength=0.5)
-        n.offset = (i + 8) * 0.5
+    # Add simple bass line
+    bass_notes = ['D2', 'A2', 'G2', 'A2']
+    for i, bn in enumerate(bass_notes):
+        n = note.Note(bn, quarterLength=1)
+        n.offset = i * 1
+        n.volume.velocity = 50
         s.append(n)
     
     return s
 
-# Example 4: Rhythmic Pattern
-def create_rhythm_pattern():
+# Example 3: Rhythmic Pattern with Articulations
+def create_rhythmic_pattern():
+    \"\"\"Create a syncopated rhythm with articulations\"\"\"
     s = stream.Stream()
-    s.append(tempo.TempoIndication(number=130))
+    s.append(tempo.MetronomeMark(number=130))
     s.append(meter.TimeSignature('4/4'))
     
-    # Create a syncopated rhythm
-    rhythm_pattern = [
-        ('C4', 0.5), ('D4', 0.25), ('E4', 0.25),
-        ('F4', 0.75), ('G4', 0.25), ('A4', 0.5),
-        ('G4', 0.25), ('F4', 0.25), ('E4', 1.0)
+    # Create a syncopated rhythm pattern
+    pattern = [
+        ('C4', 0.5, 'accent'), 
+        ('D4', 0.25, 'staccato'), 
+        ('E4', 0.25, None),
+        ('F4', 0.75, 'tenuto'), 
+        ('G4', 0.25, 'staccato'), 
+        ('A4', 0.5, None),
+        ('G4', 0.25, 'staccato'), 
+        ('F4', 0.25, None), 
+        ('E4', 1.0, 'fermata')
     ]
     
     offset = 0
-    for note_name, dur in rhythm_pattern:
+    for note_name, dur, artic in pattern:
         n = note.Note(note_name, quarterLength=dur)
         n.offset = offset
         offset += dur
+        
+        if artic:
+            art = articulations.Articulation(artic)
+            n.articulations.append(art)
+        
         s.append(n)
     
     return s
@@ -303,19 +552,24 @@ def create_rhythm_pattern():
 # Choose which example to run (change the function call)
 result = create_melody_with_chords()
 
-# Uncomment one of these to try different examples:
-# result = create_chord_progression()
-# result = create_scale_melody()
-# result = create_rhythm_pattern()
+# Uncomment to try different examples:
+# result = create_scaled_melody()
+# result = create_rhythmic_pattern()
 """
         try:
             self.text = initial_code
+            self._highlight_syntax()
         except Exception as e:
             print(f"Error setting initial text: {e}")
             self.text = "# SriDAW Code Editor\n# Ready for music21 code"
 
+
+
+
+
+
 class SriDAWApp(App):
-    """Main application class with audio fixes"""
+    """Main application class"""
     
     def build(self):
         self.title = "SriDAW - Digital Audio Workstation"
@@ -438,47 +692,19 @@ class SriDAWApp(App):
         return main_layout
     
     def init_audio(self):
-        """Initialize audio system with sine wave generator"""
-        self.note_samples = {}  # Cache for generated notes
-        self.update_status("Audio initialized (sine wave generator)")
+        """Initialize audio system"""
+        if PYGAME_AVAILABLE:
+            try:
+                pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
+                self.update_status("Audio initialized (pygame)")
+            except:
+                self.update_status("Audio initialization failed")
+        else:
+            self.update_status("Audio not available - install pygame")
     
     def update_status(self, message):
         """Update status bar"""
         self.status_label.text = f"Status: {message}"
-    
-    def midi_to_freq(self, midi_note):
-        """Convert MIDI note number to frequency"""
-        return 440.0 * (2.0 ** ((midi_note - 69) / 12.0))
-    
-    def generate_sine_wave(self, freq, duration=0.5, sample_rate=44100, volume=0.5):
-        """Generate a sine wave for audio playback"""
-        num_samples = int(sample_rate * duration)
-        samples = array.array('h', (0 for _ in range(num_samples)))
-        
-        for i in range(num_samples):
-            t = float(i) / sample_rate
-            sample_val = int(volume * 32767.0 * math.sin(2 * math.pi * freq * t))
-            samples[i] = sample_val
-        
-        return samples
-    
-    def play_note_sample(self, midi_note):
-        """Play a generated sine wave note"""
-        try:
-            if not PYGAME_AVAILABLE:
-                return
-                
-            # Generate or use cached sample
-            if midi_note not in self.note_samples:
-                freq = self.midi_to_freq(midi_note)
-                wave_data = self.generate_sine_wave(freq)
-                self.note_samples[midi_note] = wave_data
-            
-            # Create pygame Sound object
-            sound = pygame.mixer.Sound(buffer=bytes(self.note_samples[midi_note]))
-            sound.play()
-        except Exception as e:
-            print(f"Error playing note sample: {e}")
     
     def play_piano_key(self, button):
         """Play individual piano key"""
@@ -496,66 +722,113 @@ class SriDAWApp(App):
         
         if MUSIC21_AVAILABLE:
             try:
-                # Convert note name to MIDI
-                p = pitch.Pitch(note_name)
-                self.play_note_sample(p.midi)
+                # Create and play single note with better sound
+                n = note.Note(note_name, quarterLength=1)
+                n.volume.velocity = 80
+                s = stream.Stream()
+                s.append(tempo.TempoIndication(number=120))
+                s.append(n)
+                
+                # Use threading to avoid blocking UI
+                self.play_stream_quick(s)
             except Exception as e:
                 self.update_status(f"Error playing note: {e}")
+    
     
     def play_music(self, button):
         """Play current composition"""
         if self.is_playing:
             return
-        
+
         try:
-            # Get current stream from piano roll
+            # Try to get music from piano roll
             stream_obj = self.piano_roll.get_music21_stream()
-            
+
+            # Fallback: use last code result if piano roll is empty
+            if (not stream_obj or len(stream_obj.notes) == 0) and self.current_stream:
+                stream_obj = self.current_stream
+
             if stream_obj and len(stream_obj.notes) > 0:
                 self.current_stream = stream_obj
                 self.is_playing = True
                 self.play_btn.text = '⏸ Pause'
                 self.update_status("Playing...")
-                
+
                 # Play in separate thread
                 threading.Thread(target=self.play_stream_threaded, args=(stream_obj,)).start()
             else:
                 self.update_status("No notes to play")
         except Exception as e:
             self.update_status(f"Playback error: {e}")
-    
+
+
     def play_stream_threaded(self, stream_obj):
         """Play music21 stream in separate thread"""
         try:
-            if not MUSIC21_AVAILABLE:
-                return
-                
-            # Create temporary MIDI file for playback
-            temp_dir = tempfile.gettempdir()
-            temp_file = os.path.join(temp_dir, "sridaw_temp.mid")
-            
-            # Write MIDI file
-            stream_obj.write('midi', fp=temp_file)
-            
-            # Play using pygame if available
-            if PYGAME_AVAILABLE:
-                pygame.mixer.music.load(temp_file)
-                pygame.mixer.music.play()
-                
-                # Wait for playback to finish
-                while pygame.mixer.music.get_busy() and self.is_playing:
-                    pygame.time.delay(100)
-            
-            # Clean up
-            if os.path.exists(temp_file):
-                os.remove(temp_file)
-                
+            if MUSIC21_AVAILABLE:
+                # Try to use music21's built-in playback
+                try:
+                    # Create temporary MIDI file for playback
+                    temp_dir = tempfile.gettempdir()
+                    temp_file = os.path.join(temp_dir, "sridaw_temp.mid")
+                    
+                    # Write MIDI file
+                    stream_obj.write('midi', fp=temp_file)
+                    
+                    # Play using pygame if available
+                    if PYGAME_AVAILABLE:
+                        pygame.mixer.music.load(temp_file)
+                        pygame.mixer.music.play()
+                        
+                        # Wait for playback to finish
+                        while pygame.mixer.music.get_busy():
+                            pygame.time.wait(100)
+                    
+                    # Clean up
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                        
+                except Exception as e:
+                    print(f"Playback error: {e}")
+                    
         except Exception as e:
-            print(f"Playback error: {e}")
-            self.update_status(f"Playback error: {e}")
+            print(f"Stream playback error: {e}")
         finally:
             # Reset play state
             Clock.schedule_once(self.reset_play_state, 0)
+    
+    def play_stream_quick(self, stream_obj):
+        """Quick playback for single notes"""
+        try:
+            if PYGAME_AVAILABLE and stream_obj:
+                # Create temporary MIDI file for quick playback
+                temp_dir = tempfile.gettempdir()
+                temp_file = os.path.join(temp_dir, f"sridaw_quick_{id(stream_obj)}.mid")
+                
+                # Write and play MIDI file
+                stream_obj.write('midi', fp=temp_file)
+                
+                # Non-blocking playback
+                def play_quick():
+                    try:
+                        pygame.mixer.music.load(temp_file)
+                        pygame.mixer.music.play(loops=0)
+                        # Clean up after a short delay
+                        Clock.schedule_once(lambda dt: self.cleanup_temp_file(temp_file), 2)
+                    except Exception as e:
+                        print(f"Quick playback error: {e}")
+                
+                threading.Thread(target=play_quick, daemon=True).start()
+        except Exception as e:
+            print(f"Stream quick play error: {e}")
+    
+    def cleanup_temp_file(self, filepath):
+        """Clean up temporary files"""
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+        except Exception as e:
+            print(f"Cleanup error: {e}")
     
     def play_demo(self, button):
         """Play a demo composition"""
