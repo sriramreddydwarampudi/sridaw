@@ -1,1039 +1,607 @@
 #!/usr/bin/env python3
 """
-SriDAW - Digital Audio Workstation
-A Kivy-based DAW with music21 integration, piano roll, and MIDI capabilities
+VersePad Clone - Offline Poetry Writing App
+A comprehensive Kivy app for poetry writing with all features working offline
 """
 
-import kivy
-kivy.require('2.0.0')
+import os
+import re
+import json
+import sqlite3
+from typing import List, Dict, Tuple, Optional
+from collections import defaultdict, Counter
 
+# Kivy imports
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.slider import Slider
-from kivy.uix.popup import Popup
-from kivy.uix.filechooser import FileChooserListView
-from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
-from kivy.uix.widget import Widget
-from kivy.graphics import Color, Rectangle, Line
-from kivy.clock import Clock
-from kivy.core.window import Window
 from kivy.uix.scrollview import ScrollView
-from kivy.event import EventDispatcher
-from kivy.properties import NumericProperty, StringProperty, BooleanProperty
+from kivy.uix.textinput import TextInput
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.uix.popup import Popup
+from kivy.uix.tabbedpanel import TabbedPanel, TabbedPanelItem
+from kivy.uix.splitter import Splitter
+from kivy.uix.accordion import Accordion, AccordionItem
+from kivy.clock import Clock
+from kivy.metrics import dp
+from kivy.graphics import Color, Rectangle, Line
+from kivy.uix.widget import Widget
 
-import os
-import threading
-import tempfile
-from pathlib import Path
-
-# Music21 imports
+# NLP and dictionary libraries
 try:
-    from music21 import stream, note, pitch, duration, tempo, meter, key, scale
-    from music21 import midi as music21_midi
-    from music21.midi import realtime as rt
-    MUSIC21_AVAILABLE = True
+    import nltk
+    from nltk.corpus import cmudict, wordnet
+    from nltk.tokenize import word_tokenize, syllable_tokenize
+    nltk.download('cmudict', quiet=True)
+    nltk.download('wordnet', quiet=True)
+    nltk.download('punkt', quiet=True)
+    NLTK_AVAILABLE = True
 except ImportError:
-    MUSIC21_AVAILABLE = False
-    print("Warning: music21 not available. Install with: pip install music21")
+    NLTK_AVAILABLE = False
 
-# Audio playback (optional, fallback to basic MIDI)
 try:
-    import pygame
-    PYGAME_AVAILABLE = True
+    import pronouncing
+    PRONOUNCING_AVAILABLE = True
 except ImportError:
-    PYGAME_AVAILABLE = False
-    print("Warning: pygame not available for audio. Install with: pip install pygame")
+    PRONOUNCING_AVAILABLE = False
 
-class PianoKey(Button):
-    """Individual piano key widget"""
-    def __init__(self, note_name, is_black=False, **kwargs):
-        super().__init__(**kwargs)
-        self.note_name = note_name
-        self.is_black = is_black
-        self.background_color = (0.2, 0.2, 0.2, 1) if is_black else (1, 1, 1, 1)
-        self.color = (1, 1, 1, 1) if is_black else (0, 0, 0, 1)
-        self.text = note_name
-        self.size_hint_y = 0.6 if is_black else 1.0
+try:
+    from textstat import flesch_reading_ease, syllable_count
+    TEXTSTAT_AVAILABLE = True
+except ImportError:
+    TEXTSTAT_AVAILABLE = False
 
-class PianoRoll(Widget):
-    """Piano roll editor widget"""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.notes = []  # List of note objects
-        self.grid_width = 20
-        self.grid_height = 15
-        self.selected_note = None
-        self.drawing = False
-        
-        # Bind events (remove old bindings)
-        # Events will be handled by the overridden methods
-        
-        # Draw initial grid
-        Clock.schedule_once(lambda dt: self.draw_grid(), 0.1)
-    
-    def draw_grid(self):
-        """Draw the piano roll grid"""
-        try:
-            self.canvas.clear()
-            with self.canvas:
-                # Background
-                Color(0.1, 0.1, 0.1, 1)
-                Rectangle(pos=self.pos, size=self.size)
-                
-                # Grid lines
-                Color(0.3, 0.3, 0.3, 1)
-                # Vertical lines (time)
-                if self.width > 0 and self.height > 0:
-                    for x in range(0, int(self.width), self.grid_width):
-                        Line(points=[x, 0, x, self.height], width=1)
-                    
-                    # Horizontal lines (pitch)
-                    for y in range(0, int(self.height), self.grid_height):
-                        Line(points=[0, y, self.width, y], width=1)
-                
-                # Draw notes
-                self.draw_notes()
-        except Exception as e:
-            print(f"Error drawing grid: {e}")
-    
-    def draw_notes(self):
-        """Draw all notes on the piano roll"""
-        try:
-            with self.canvas:
-                Color(0.2, 0.7, 0.2, 0.8)  # Green notes
-                for note_data in self.notes:
-                    x = note_data['time'] * self.grid_width
-                    y = note_data['pitch'] * self.grid_height
-                    w = note_data['duration'] * self.grid_width
-                    h = max(2, self.grid_height - 2)  # Ensure minimum height
-                    if w > 0 and h > 0:  # Only draw if dimensions are valid
-                        Rectangle(pos=(x, y), size=(w, h))
-        except Exception as e:
-            print(f"Error drawing notes: {e}")
-    
-    def on_touch_down(self, instance, touch):
-        if self.collide_point(*touch.pos):
-            # Convert touch position to grid coordinates
-            grid_x = int((touch.pos[0] - self.x) // self.grid_width)
-            grid_y = int((touch.pos[1] - self.y) // self.grid_height)
-            
-            # Add new note
-            new_note = {
-                'time': grid_x,
-                'pitch': grid_y,
-                'duration': 2,  # Default duration
-                'velocity': 80
-            }
-            self.notes.append(new_note)
-            self.drawing = True
-            self.draw_grid()
-            
-            # Play note sound when added
-            self.play_note_sound(grid_y)
-            return True
-        return False
-    
-    def on_touch_move(self, instance, touch):
-        if self.drawing and self.collide_point(*touch.pos):
-            # Extend note duration while dragging
-            if self.notes:
-                grid_x = int((touch.pos[0] - self.x) // self.grid_width)
-                last_note = self.notes[-1]
-                last_note['duration'] = max(1, grid_x - last_note['time'])
-                self.draw_grid()
-    
-    def on_touch_up(self, instance, touch):
-        self.drawing = False
-    
-    def play_note_sound(self, grid_pitch):
-        """Play sound for a note at given grid pitch"""
-        try:
-            if MUSIC21_AVAILABLE:
-                # Convert grid pitch to MIDI note
-                midi_note = 60 + (grid_pitch - 20)  # C4 = 60
-                midi_note = max(21, min(127, midi_note))  # Clamp to valid MIDI range
-                
-                # Create and play note
-                n = note.Note(midi=midi_note)
-                n.quarterLength = 0.5
-                s = stream.Stream()
-                s.append(n)
-                
-                # Quick playback
-                self.parent.parent.parent.parent.play_stream_quick(s)
-        except Exception as e:
-            print(f"Error playing note: {e}")
-    
-    def clear_notes(self):
-        """Clear all notes"""
-        self.notes = []
-        self.draw_grid()
-    
-    def get_music21_stream(self):
-        """Convert piano roll notes to music21 stream"""
-        if not MUSIC21_AVAILABLE:
-            return None
-        
-        s = stream.Stream()
-        s.append(tempo.TempoIndication(number=120))
-        s.append(meter.TimeSignature('4/4'))
-        s.append(key.KeySignature(0))
-        
-        # Convert grid notes to music21 notes
-        for note_data in self.notes:
-            # Convert grid pitch to MIDI note (C4 = 60)
-            midi_note = 60 + (note_data['pitch'] - 20)  # Adjust offset as needed
-            
-            # Create note
-            n = note.Note(midi=midi_note)
-            n.quarterLength = note_data['duration'] * 0.25  # Convert grid to quarter notes
-            n.volume.velocity = note_data['velocity']
-            
-            # Set offset (timing)
-            n.offset = note_data['time'] * 0.25
-            
-            s.append(n)
-        
-        return s
+try:
+    import pyphen
+    PYPHEN_AVAILABLE = True
+except ImportError:
+    PYPHEN_AVAILABLE = False
 
 
-class CodeEditor(TextInput):
-    """Enhanced code editor with music21 syntax highlighting and autocompletion"""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.multiline = True
-        self.background_color = (0.1, 0.1, 0.1, 1)
-        self.foreground_color = (1, 1, 1, 1)
-        self.font_name = 'Courier'  # Monospace font for code
-        self.font_size = 14
-        self.cursor_color = (1, 1, 1, 1)
-        self.hint_text = "Write your music21 code here..."
-        
-        # Syntax highlighting colors
-        self.keyword_color = (0.8, 0.2, 0.6, 1)    # Pink
-        self.string_color = (0.2, 0.8, 0.2, 1)       # Green
-        self.comment_color = (0.5, 0.5, 0.5, 1)      # Gray
-        self.function_color = (0.4, 0.6, 1.0, 1)     # Blue
-        self.class_color = (0.8, 0.6, 0.2, 1)        # Orange
-        self.constant_color = (0.8, 0.8, 0.2, 1)     # Yellow
-        
-        # Music21 specific keywords and functions
-        self.music21_keywords = [
-            'stream', 'note', 'pitch', 'duration', 'tempo', 'meter', 
-            'key', 'scale', 'chord', 'interval', 'clef', 'articulations',
-            'dynamics', 'instrument', 'midi', 'realtime', 'environment',
-            'corpus', 'common', 'configure', 'analysis', 'graph'
-        ]
-        
-        self.python_keywords = [
-            'def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while',
-            'break', 'continue', 'import', 'from', 'as', 'try', 'except',
-            'finally', 'with', 'lambda', 'yield', 'None', 'True', 'False'
-        ]
-        
-        # Setup autocompletion
-        self.completion_list = self._build_completion_list()
-        self.completion_popup = None
-        self.completion_start = 0
-        self.completion_end = 0
-        
-        # Bind events
-        self.bind(text=self.on_text)
-        self.bind(focus=self.on_focus)
-        
-        # Set initial text after widget is ready
-        Clock.schedule_once(self.set_initial_text, 0.1)
+class PoetryAnalyzer:
+    """Core analysis engine for poetry features"""
     
-    def _build_completion_list(self):
-        """Build the autocompletion list with music21-specific items"""
-        base_list = self.python_keywords + self.music21_keywords
-        
-        # Add music21 class methods and properties
-        if MUSIC21_AVAILABLE:
-            music21_classes = {
-                'stream.Stream': ['append', 'insert', 'measure', 'show', 'write', 
-                                'flat', 'notes', 'parts', 'recurse', 'transpose'],
-                'note.Note': ['pitch', 'duration', 'offset', 'volume', 'articulations',
-                             'lyric', 'tie', 'name', 'octave', 'midi'],
-                'chord.Chord': ['pitches', 'root', 'bass', 'inversion', 'isMajorTriad',
-                               'isMinorTriad', 'isDiminishedTriad', 'isAugmentedTriad'],
-                'scale.Scale': ['getPitches', 'derive', 'getTonic', 'getDominant']
-            }
+    def __init__(self):
+        self.cmu_dict = None
+        self.wordnet_dict = None
+        self.pyphen_dic = None
+        self.initialize_resources()
+    
+    def initialize_resources(self):
+        """Initialize offline resources"""
+        if NLTK_AVAILABLE:
+            try:
+                self.cmu_dict = cmudict.dict()
+            except:
+                pass
             
-            for cls, methods in music21_classes.items():
-                base_list.extend([f"{cls}.{m}" for m in methods])
+            try:
+                self.wordnet_dict = wordnet
+            except:
+                pass
         
-        return sorted(list(set(base_list)))
+        if PYPHEN_AVAILABLE:
+            try:
+                self.pyphen_dic = pyphen.Pyphen(lang='en')
+            except:
+                pass
     
-    def on_text(self, instance, value):
-        """Triggered when text changes - handles syntax highlighting"""
-        self._highlight_syntax()
+    def get_word_definition(self, word: str) -> List[str]:
+        """Get word definitions"""
+        definitions = []
+        word = word.lower().strip()
         
-        # Show completion popup when typing
-        if self.focus and len(self.text) > 0:
-            self._update_completion()
-    
-    def on_focus(self, instance, value):
-        """Handle focus changes"""
-        if value:  # Got focus
-            self._highlight_syntax()
-            self._update_completion()
-        else:      # Lost focus
-            if self.completion_popup:
-                self.completion_popup.dismiss()
-                self.completion_popup = None
-    
-    def _highlight_syntax(self):
-        """Apply syntax highlighting to the code"""
-        try:
-            # Get the text and clear previous highlighting
-            text = self.text
-            self._clear_highlighting()
-            
-            # Highlight Python and music21 keywords
-            for word in self.python_keywords + self.music21_keywords:
-                self._highlight_word(word, self.keyword_color)
-            
-            # Highlight strings
-            self._highlight_pattern(r'(\'[^\']*\'|\"[^\"]*\")', self.string_color)
-            
-            # Highlight comments
-            self._highlight_pattern(r'#[^\n]*', self.comment_color)
-            
-            # Highlight function definitions
-            self._highlight_pattern(r'def\s+(\w+)', self.function_color, group=1)
-            
-            # Highlight class definitions
-            self._highlight_pattern(r'class\s+(\w+)', self.class_color, group=1)
-            
-        except Exception as e:
-            print(f"Syntax highlighting error: {e}")
-    
-    def _clear_highlighting(self):
-        """Clear all syntax highlighting"""
-        if hasattr(self, '_highlight_rectangles'):
-            for rect in self._highlight_rectangles:
-                self.canvas.before.remove(rect)
-            del self._highlight_rectangles
-        self._highlight_rectangles = []
-    
-    def _highlight_word(self, word, color):
-        """Highlight all occurrences of a specific word"""
-        text = self.text
-        start_idx = 0
-        word_len = len(word)
+        if self.wordnet_dict:
+            try:
+                synsets = self.wordnet_dict.synsets(word)
+                for synset in synsets[:3]:  # Limit to first 3 definitions
+                    definitions.append(f"{synset.pos()}: {synset.definition()}")
+            except:
+                pass
         
-        while True:
-            idx = text.find(word, start_idx)
-            if idx == -1:
-                break
-                
-            # Check if it's a whole word (not part of another word)
-            if (idx == 0 or not text[idx-1].isalnum()) and \
-               (idx + word_len >= len(text) or not text[idx + word_len].isalnum()):
-                self._highlight_range(idx, idx + word_len, color)
-                
-            start_idx = idx + word_len
+        if not definitions:
+            definitions = [f"Definition for '{word}' not found offline"]
+        
+        return definitions
     
-    def _highlight_pattern(self, pattern, color, group=0):
-        """Highlight text matching a regex pattern"""
-        import re
-        text = self.text
-        for match in re.finditer(pattern, text):
-            start, end = match.span(group)
-            self._highlight_range(start, end, color)
+    def get_phonetics(self, word: str) -> str:
+        """Get phonetic representation of word"""
+        word = word.lower().strip()
+        
+        if PRONOUNCING_AVAILABLE:
+            try:
+                phones = pronouncing.phones_for_word(word)
+                if phones:
+                    return phones[0]
+            except:
+                pass
+        
+        if self.cmu_dict and word in self.cmu_dict:
+            return ' '.join(self.cmu_dict[word][0])
+        
+        return f"Phonetics for '{word}' not available offline"
     
-    def _highlight_range(self, start, end, color):
-        """Highlight a specific range of text"""
-        # Get line information
-        lines = self.text.split('\n')
-        line_start = 0
+    def get_rhymes(self, word: str) -> List[str]:
+        """Get rhyming words"""
+        word = word.lower().strip()
+        rhymes = []
+        
+        if PRONOUNCING_AVAILABLE:
+            try:
+                rhymes = pronouncing.rhymes(word)[:20]  # Limit to 20 rhymes
+            except:
+                pass
+        
+        if not rhymes and self.cmu_dict:
+            # Simple rhyme detection using CMU dict
+            word_phones = self.cmu_dict.get(word, [])
+            if word_phones:
+                word_ending = word_phones[0][-2:]  # Last 2 phonemes
+                for dict_word, phones_list in self.cmu_dict.items():
+                    if dict_word != word and phones_list[0][-2:] == word_ending:
+                        rhymes.append(dict_word)
+                        if len(rhymes) >= 20:
+                            break
+        
+        return rhymes
+    
+    def count_syllables(self, word: str) -> int:
+        """Count syllables in a word"""
+        word = word.lower().strip()
+        
+        if TEXTSTAT_AVAILABLE:
+            try:
+                return syllable_count(word)
+            except:
+                pass
+        
+        if self.pyphen_dic:
+            try:
+                return len(self.pyphen_dic.inserted(word).split('-'))
+            except:
+                pass
+        
+        if self.cmu_dict and word in self.cmu_dict:
+            return len([ph for ph in self.cmu_dict[word][0] if ph[-1].isdigit()])
+        
+        # Fallback syllable counting
+        vowels = 'aeiouyAEIOUY'
+        syllables = 0
+        prev_was_vowel = False
+        
+        for char in word:
+            is_vowel = char in vowels
+            if is_vowel and not prev_was_vowel:
+                syllables += 1
+            prev_was_vowel = is_vowel
+        
+        return max(1, syllables)
+    
+    def analyze_meter(self, text: str) -> Dict:
+        """Analyze meter of text"""
+        lines = text.strip().split('\n')
+        meter_analysis = {
+            'lines': [],
+            'pattern': '',
+            'consistency': 0.0
+        }
+        
+        syllable_counts = []
+        
         for line in lines:
-            line_end = line_start + len(line)
-            if start < line_end:
-                break
-            line_start = line_end + 1  # +1 for the newline
+            if not line.strip():
+                continue
+                
+            words = re.findall(r'\b\w+\b', line.lower())
+            line_syllables = sum(self.count_syllables(word) for word in words)
+            syllable_counts.append(line_syllables)
+            
+            # Simple stress pattern (alternating for now)
+            stress_pattern = ''.join(['/' if i % 2 == 1 else 'u' for i in range(line_syllables)])
+            
+            meter_analysis['lines'].append({
+                'text': line,
+                'syllables': line_syllables,
+                'stress_pattern': stress_pattern,
+                'words': words
+            })
         
-        # Calculate positions
-        x, y = self.get_cursor_from_index(start)
-        x2, y2 = self.get_cursor_from_index(end)
+        if syllable_counts:
+            most_common = Counter(syllable_counts).most_common(1)[0]
+            consistency = syllable_counts.count(most_common[0]) / len(syllable_counts)
+            meter_analysis['consistency'] = consistency
+            meter_analysis['common_length'] = most_common[0]
         
-        # Create highlight rectangle
-        with self.canvas.before:
-            Color(*color)
-            rect = Rectangle(
-                pos=(self.x + x, self.y + y),
-                size=(x2 - x, self.line_height)
-            )
-            self._highlight_rectangles.append(rect)
+        return meter_analysis
     
-    def _update_completion(self):
-        """Update the autocompletion popup"""
-        # Get current word
-        text = self.text[:self.cursor_index()]
-        if not text:
+    def analyze_rhyme_scheme(self, text: str) -> Dict:
+        """Analyze rhyme scheme of poem"""
+        lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
+        rhyme_scheme = []
+        rhyme_groups = {}
+        current_letter = 'A'
+        
+        for line in lines:
+            words = re.findall(r'\b\w+\b', line.lower())
+            if not words:
+                rhyme_scheme.append('-')
+                continue
+            
+            last_word = words[-1]
+            
+            # Find rhyming group
+            found_group = None
+            for letter, group_words in rhyme_groups.items():
+                if any(self.words_rhyme(last_word, word) for word in group_words):
+                    found_group = letter
+                    break
+            
+            if found_group:
+                rhyme_scheme.append(found_group)
+                rhyme_groups[found_group].append(last_word)
+            else:
+                rhyme_scheme.append(current_letter)
+                rhyme_groups[current_letter] = [last_word]
+                current_letter = chr(ord(current_letter) + 1)
+        
+        return {
+            'scheme': ' '.join(rhyme_scheme),
+            'groups': rhyme_groups,
+            'lines': lines
+        }
+    
+    def words_rhyme(self, word1: str, word2: str) -> bool:
+        """Check if two words rhyme"""
+        if word1 == word2:
+            return True
+        
+        if PRONOUNCING_AVAILABLE:
+            try:
+                return word2 in pronouncing.rhymes(word1)
+            except:
+                pass
+        
+        if self.cmu_dict:
+            phones1 = self.cmu_dict.get(word1, [])
+            phones2 = self.cmu_dict.get(word2, [])
+            if phones1 and phones2:
+                return phones1[0][-2:] == phones2[0][-2:]
+        
+        # Simple ending-based rhyme detection
+        return word1.endswith(word2[-2:]) or word2.endswith(word1[-2:])
+
+
+class VisualMeterWidget(Widget):
+    """Widget for visual meter representation"""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.meter_data = None
+        self.bind(size=self.update_graphics)
+    
+    def set_meter_data(self, meter_data):
+        self.meter_data = meter_data
+        self.update_graphics()
+    
+    def update_graphics(self, *args):
+        self.canvas.clear()
+        if not self.meter_data or not self.meter_data.get('lines'):
             return
+        
+        with self.canvas:
+            Color(0.2, 0.2, 0.2, 1)  # Dark gray
+            Rectangle(pos=self.pos, size=self.size)
             
-        # Find the start of the current word
-        start = max(text.rfind(' '), text.rfind('\n'), text.rfind('('), 
-                text.rfind('.'), text.rfind('[')) + 1
-        current_word = text[start:]
-        
-        # Filter completion list
-        matches = [w for w in self.completion_list if w.startswith(current_word)]
-        
-        if matches and current_word:
-            self.completion_start = start
-            self.completion_end = self.cursor_index()
-            self._show_completion_popup(matches)
-        elif self.completion_popup:
-            self.completion_popup.dismiss()
-            self.completion_popup = None
-    
-    def _show_completion_popup(self, items):
-        """Show the autocompletion popup"""
-        if self.completion_popup:
-            self.completion_popup.dismiss()
-        
-        # Create popup content
-        content = GridLayout(cols=1, spacing=5, size_hint_y=None)
-        content.bind(minimum_height=content.setter('height'))
-        
-        # Add completion items
-        for item in items[:10]:  # Limit to 10 items
-            btn = Button(text=item, size_hint_y=None, height=30)
-            btn.bind(on_press=lambda btn: self._apply_completion(btn.text))
-            content.add_widget(btn)
-        
-        # Create and open popup
-        popup = Popup(content=content, size_hint=(0.3, 0.4),
-                     pos_hint={'x': 0.1, 'top': 0.9})
-        self.completion_popup = popup
-        popup.open()
-    
-    def _apply_completion(self, text):
-        """Apply the selected completion"""
-        if self.completion_popup:
-            self.completion_popup.dismiss()
-            self.completion_popup = None
+            Color(1, 1, 1, 1)  # White
             
-        # Replace current word with completion
-        current_text = self.text
-        new_text = (current_text[:self.completion_start] + 
-                   text + 
-                   current_text[self.completion_end:])
-        self.text = new_text
-        
-        # Move cursor to end of inserted text
-        self.cursor = (self.completion_start + len(text), self.cursor[1])
-    
-    def keyboard_on_key_down(self, window, keycode, text, modifiers):
-        """Handle keyboard events for autocompletion"""
-        # Tab key completes the first suggestion
-        if keycode[1] == 'tab' and self.completion_popup:
-            if self.completion_popup.content.children:
-                first_item = self.completion_popup.content.children[-1].text
-                self._apply_completion(first_item)
-            return True
-        
-        # Enter key confirms completion if popup is open
-        if keycode[1] == 'enter' and self.completion_popup:
-            return True
+            line_height = self.height / max(len(self.meter_data['lines']), 1)
             
-        # Arrow keys navigate completion popup
-        if keycode[1] in ('up', 'down') and self.completion_popup:
-            return True
-            
-        return super().keyboard_on_key_down(window, keycode, text, modifiers)
-    
-    def set_initial_text(self, dt):
-        """Set initial text content with improved examples"""
-        initial_code = """# SriDAW Music21 Code Editor
-# Create rich musical compositions with harmony and rhythm
-
-from music21 import *
-
-# Example 1: Simple Melody with Chords
-def create_melody_with_chords():
-    \"\"\"Create a melody with chord accompaniment\"\"\"
-    s = stream.Stream()
-    s.append(tempo.MetronomeMark(number=120))
-    s.append(meter.TimeSignature('4/4'))
-    s.append(key.KeySignature(0))  # C major
-    
-    # Melody line
-    melody_notes = ['C4', 'E4', 'G4', 'C5', 'G4', 'E4', 'C4']
-    durations = [1, 0.5, 0.5, 1, 0.5, 0.5, 1]
-    
-    for i, (note_name, dur) in enumerate(zip(melody_notes, durations)):
-        n = note.Note(note_name, quarterLength=dur)
-        n.offset = sum(durations[:i])
-        s.append(n)
-    
-    # Add simple chord accompaniment
-    chords = [
-        chord.Chord(['C3', 'E3', 'G3'], quarterLength=2),
-        chord.Chord(['F3', 'A3', 'C4'], quarterLength=2),
-        chord.Chord(['G3', 'B3', 'D4'], quarterLength=2),
-        chord.Chord(['C3', 'E3', 'G3'], quarterLength=2)
-    ]
-    
-    for i, c in enumerate(chords):
-        c.offset = i * 2
-        s.append(c)
-    
-    return s
-
-# Example 2: Scale-based Melody with Dynamics
-def create_scaled_melody():
-    \"\"\"Create a melody from a scale with dynamic shaping\"\"\"
-    s = stream.Stream()
-    s.append(tempo.MetronomeMark(number=100))
-    
-    # Create D minor scale
-    d_minor = scale.MinorScale('D4')
-    scale_notes = d_minor.getPitches('D4', 'D5')
-    
-    # Create melody with crescendo
-    for i, p in enumerate(scale_notes):
-        n = note.Note(p, quarterLength=0.5)
-        n.offset = i * 0.5
-        n.volume.velocity = 60 + (i * 5)  # Crescendo
-        s.append(n)
-    
-    # Add simple bass line
-    bass_notes = ['D2', 'A2', 'G2', 'A2']
-    for i, bn in enumerate(bass_notes):
-        n = note.Note(bn, quarterLength=1)
-        n.offset = i * 1
-        n.volume.velocity = 50
-        s.append(n)
-    
-    return s
-
-# Example 3: Rhythmic Pattern with Articulations
-def create_rhythmic_pattern():
-    \"\"\"Create a syncopated rhythm with articulations\"\"\"
-    s = stream.Stream()
-    s.append(tempo.MetronomeMark(number=130))
-    s.append(meter.TimeSignature('4/4'))
-    
-    # Create a syncopated rhythm pattern
-    pattern = [
-        ('C4', 0.5, 'accent'), 
-        ('D4', 0.25, 'staccato'), 
-        ('E4', 0.25, None),
-        ('F4', 0.75, 'tenuto'), 
-        ('G4', 0.25, 'staccato'), 
-        ('A4', 0.5, None),
-        ('G4', 0.25, 'staccato'), 
-        ('F4', 0.25, None), 
-        ('E4', 1.0, 'fermata')
-    ]
-    
-    offset = 0
-    for note_name, dur, artic in pattern:
-        n = note.Note(note_name, quarterLength=dur)
-        n.offset = offset
-        offset += dur
-        
-        if artic:
-            art = articulations.Articulation(artic)
-            n.articulations.append(art)
-        
-        s.append(n)
-    
-    return s
-
-# Choose which example to run (change the function call)
-result = create_melody_with_chords()
-
-# Uncomment to try different examples:
-# result = create_scaled_melody()
-# result = create_rhythmic_pattern()
-"""
-        try:
-            self.text = initial_code
-            self._highlight_syntax()
-        except Exception as e:
-            print(f"Error setting initial text: {e}")
-            self.text = "# SriDAW Code Editor\n# Ready for music21 code"
+            for i, line_data in enumerate(self.meter_data['lines']):
+                y = self.y + self.height - (i + 1) * line_height
+                
+                stress_pattern = line_data.get('stress_pattern', '')
+                if not stress_pattern:
+                    continue
+                
+                syllable_width = self.width / max(len(stress_pattern), 1)
+                
+                for j, stress in enumerate(stress_pattern):
+                    x = self.x + j * syllable_width + syllable_width / 2
+                    
+                    if stress == '/':  # Stressed
+                        Line(points=[x, y, x, y + line_height * 0.6], width=2)
+                    else:  # Unstressed
+                        Line(points=[x - 5, y + line_height * 0.3, x + 5, y + line_height * 0.3], width=2)
 
 
+class PoemEditor(TextInput):
+    """Enhanced text input for poem editing"""
+    
+    def __init__(self, analyzer, **kwargs):
+        super().__init__(**kwargs)
+        self.analyzer = analyzer
+        self.multiline = True
+        self.font_size = dp(16)
+        self.bind(text=self.on_text_change)
+        self.analysis_callback = None
+    
+    def set_analysis_callback(self, callback):
+        self.analysis_callback = callback
+    
+    def on_text_change(self, instance, value):
+        if self.analysis_callback:
+            Clock.unschedule(self.delayed_analysis)
+            Clock.schedule_once(self.delayed_analysis, 1.0)  # Delay analysis by 1 second
+    
+    def delayed_analysis(self, dt):
+        if self.analysis_callback:
+            self.analysis_callback(self.text)
 
 
-
-
-class SriDAWApp(App):
+class VersePadApp(App):
     """Main application class"""
     
     def build(self):
-        self.title = "SriDAW - Digital Audio Workstation"
+        self.analyzer = PoetryAnalyzer()
+        self.title = "VersePad - Offline Poetry Writer"
         
         # Main layout
-        main_layout = BoxLayout(orientation='vertical')
+        main_layout = BoxLayout(orientation='horizontal')
         
-        # Top toolbar
-        toolbar = BoxLayout(size_hint_y=0.1, spacing=5)
+        # Create splitter for resizable panels
+        splitter = Splitter(sizable_from='right')
         
-        # Transport controls
-        self.play_btn = Button(text='▶ Play', size_hint_x=0.15)
-        self.stop_btn = Button(text='⏹ Stop', size_hint_x=0.15)
-        self.record_btn = Button(text='⏺ Rec', size_hint_x=0.15)
+        # Left panel - Text editor
+        editor_panel = BoxLayout(orientation='vertical')
         
-        self.play_btn.bind(on_press=self.play_music)
-        self.stop_btn.bind(on_press=self.stop_music)
-        self.record_btn.bind(on_press=self.toggle_record)
+        # Toolbar
+        toolbar = BoxLayout(size_hint_y=None, height=dp(50))
         
-        # File operations
-        self.export_midi_btn = Button(text='Export MIDI', size_hint_x=0.15)
-        self.export_code_btn = Button(text='Export Code', size_hint_x=0.15)
-        self.demo_btn = Button(text='🎵 Demo', size_hint_x=0.1)
+        new_btn = Button(text='New', size_hint_x=None, width=dp(80))
+        new_btn.bind(on_press=self.new_poem)
         
-        self.export_midi_btn.bind(on_press=self.export_midi)
-        self.export_code_btn.bind(on_press=self.export_code)
-        self.demo_btn.bind(on_press=self.play_demo)
+        save_btn = Button(text='Save', size_hint_x=None, width=dp(80))
+        save_btn.bind(on_press=self.save_poem)
         
-        # Tempo control
-        tempo_label = Label(text='BPM:', size_hint_x=0.1)
-        self.tempo_slider = Slider(min=60, max=200, value=120, size_hint_x=0.2)
+        load_btn = Button(text='Load', size_hint_x=None, width=dp(80))
+        load_btn.bind(on_press=self.load_poem)
         
-        toolbar.add_widget(self.play_btn)
-        toolbar.add_widget(self.stop_btn)
-        toolbar.add_widget(self.record_btn)
-        toolbar.add_widget(Label(text='|', size_hint_x=0.05))  # Separator
-        toolbar.add_widget(self.export_midi_btn)
-        toolbar.add_widget(self.export_code_btn)
-        toolbar.add_widget(self.demo_btn)
-        toolbar.add_widget(Label(text='|', size_hint_x=0.05))  # Separator
-        toolbar.add_widget(tempo_label)
-        toolbar.add_widget(self.tempo_slider)
+        toolbar.add_widget(new_btn)
+        toolbar.add_widget(save_btn)
+        toolbar.add_widget(load_btn)
+        toolbar.add_widget(Label())  # Spacer
         
-        # Tabbed interface
-        tab_panel = TabbedPanel(do_default_tab=False)
+        # Text editor
+        self.poem_editor = PoemEditor(self.analyzer)
+        self.poem_editor.set_analysis_callback(self.analyze_poem)
         
-        # Piano Roll Tab
-        piano_roll_tab = TabbedPanelItem(text='Piano Roll')
-        piano_roll_layout = BoxLayout(orientation='horizontal')
+        editor_panel.add_widget(toolbar)
+        editor_panel.add_widget(self.poem_editor)
         
-        # Piano keys (left side)
-        piano_keys_layout = BoxLayout(orientation='vertical', size_hint_x=0.15)
+        splitter.add_widget(editor_panel)
         
-        # Create piano keys (simplified - just white keys for now)
-        note_names = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
-        octaves = [5, 4, 3, 2]  # Top to bottom
+        # Right panel - Analysis tools
+        analysis_panel = TabbedPanel(do_default_tab=False, tab_width=dp(120))
         
-        for octave in octaves:
-            for note_name in reversed(note_names):  # Reverse for top-to-bottom
-                key = PianoKey(f'{note_name}{octave}')
-                key.bind(on_press=self.play_piano_key)
-                piano_keys_layout.add_widget(key)
+        # Dictionary tab
+        dict_tab = TabbedPanelItem(text='Dictionary')
+        dict_layout = BoxLayout(orientation='vertical')
         
-        # Piano roll editor
-        self.piano_roll = PianoRoll()
-        piano_roll_scroll = ScrollView()
-        piano_roll_scroll.add_widget(self.piano_roll)
+        dict_input = TextInput(hint_text='Enter word to look up...', 
+                              size_hint_y=None, height=dp(40), multiline=False)
+        dict_input.bind(on_text_validate=lambda x: self.lookup_word(dict_input.text))
         
-        piano_roll_layout.add_widget(piano_keys_layout)
-        piano_roll_layout.add_widget(piano_roll_scroll)
+        self.dict_results = Label(text='Enter a word to see its definition',
+                                 text_size=(None, None), valign='top')
+        dict_scroll = ScrollView()
+        dict_scroll.add_widget(self.dict_results)
         
-        # Piano roll controls
-        piano_controls = BoxLayout(orientation='horizontal', size_hint_y=0.1)
-        clear_btn = Button(text='Clear', size_hint_x=0.2)
-        clear_btn.bind(on_press=lambda x: self.piano_roll.clear_notes())
-        piano_controls.add_widget(clear_btn)
-        piano_controls.add_widget(Label())  # Spacer
+        dict_layout.add_widget(dict_input)
+        dict_layout.add_widget(dict_scroll)
+        dict_tab.add_widget(dict_layout)
         
-        piano_roll_content = BoxLayout(orientation='vertical')
-        piano_roll_content.add_widget(piano_roll_layout)
-        piano_roll_content.add_widget(piano_controls)
+        # Rhymes tab
+        rhymes_tab = TabbedPanelItem(text='Rhymes')
+        rhymes_layout = BoxLayout(orientation='vertical')
         
-        piano_roll_tab.add_widget(piano_roll_content)
-        tab_panel.add_widget(piano_roll_tab)
+        rhyme_input = TextInput(hint_text='Enter word to find rhymes...',
+                               size_hint_y=None, height=dp(40), multiline=False)
+        rhyme_input.bind(on_text_validate=lambda x: self.find_rhymes(rhyme_input.text))
         
-        # Code Editor Tab
-        code_tab = TabbedPanelItem(text='Code Editor')
-        code_layout = BoxLayout(orientation='vertical')
+        self.rhyme_results = Label(text='Enter a word to find rhymes',
+                                  text_size=(None, None), valign='top')
+        rhyme_scroll = ScrollView()
+        rhyme_scroll.add_widget(self.rhyme_results)
         
-        # Code editor
-        self.code_editor = CodeEditor()
+        rhymes_layout.add_widget(rhyme_input)
+        rhymes_layout.add_widget(rhyme_scroll)
+        rhymes_tab.add_widget(rhymes_layout)
         
-        # Code controls
-        code_controls = BoxLayout(orientation='horizontal', size_hint_y=0.1)
-        run_code_btn = Button(text='Run Code', size_hint_x=0.2)
-        run_code_btn.bind(on_press=self.run_code)
-        code_controls.add_widget(run_code_btn)
-        code_controls.add_widget(Label())  # Spacer
+        # Phonetics tab
+        phonetics_tab = TabbedPanelItem(text='Phonetics')
+        phonetics_layout = BoxLayout(orientation='vertical')
         
-        code_layout.add_widget(self.code_editor)
-        code_layout.add_widget(code_controls)
-        code_tab.add_widget(code_layout)
-        tab_panel.add_widget(code_tab)
+        phonetic_input = TextInput(hint_text='Enter word for phonetics...',
+                                  size_hint_y=None, height=dp(40), multiline=False)
+        phonetic_input.bind(on_text_validate=lambda x: self.get_phonetics(phonetic_input.text))
         
-        # Add components to main layout
-        main_layout.add_widget(toolbar)
-        main_layout.add_widget(tab_panel)
+        self.phonetic_results = Label(text='Enter a word to see phonetics',
+                                     text_size=(None, None), valign='top')
+        phonetic_scroll = ScrollView()
+        phonetic_scroll.add_widget(self.phonetic_results)
         
-        # Status bar
-        self.status_label = Label(text='Ready', size_hint_y=0.05)
-        main_layout.add_widget(self.status_label)
+        phonetics_layout.add_widget(phonetic_input)
+        phonetics_layout.add_widget(phonetic_scroll)
+        phonetics_tab.add_widget(phonetics_layout)
         
-        # Initialize audio
-        self.init_audio()
+        # Meter Analysis tab
+        meter_tab = TabbedPanelItem(text='Meter')
+        meter_layout = BoxLayout(orientation='vertical')
         
-        # Current stream for playback
-        self.current_stream = None
-        self.is_playing = False
+        self.meter_results = Label(text='Type your poem to see meter analysis',
+                                  text_size=(None, None), valign='top')
+        meter_scroll = ScrollView(size_hint_y=0.7)
+        meter_scroll.add_widget(self.meter_results)
+        
+        # Visual meter display
+        self.visual_meter = VisualMeterWidget(size_hint_y=0.3)
+        
+        meter_layout.add_widget(meter_scroll)
+        meter_layout.add_widget(Label(text='Visual Meter:', size_hint_y=None, height=dp(30)))
+        meter_layout.add_widget(self.visual_meter)
+        meter_tab.add_widget(meter_layout)
+        
+        # Rhyme Scheme tab
+        rhyme_scheme_tab = TabbedPanelItem(text='Rhyme Scheme')
+        rhyme_scheme_layout = BoxLayout(orientation='vertical')
+        
+        self.rhyme_scheme_results = Label(text='Type your poem to see rhyme scheme',
+                                         text_size=(None, None), valign='top')
+        rhyme_scheme_scroll = ScrollView()
+        rhyme_scheme_scroll.add_widget(self.rhyme_scheme_results)
+        
+        rhyme_scheme_layout.add_widget(rhyme_scheme_scroll)
+        rhyme_scheme_tab.add_widget(rhyme_scheme_layout)
+        
+        # Add all tabs
+        analysis_panel.add_widget(dict_tab)
+        analysis_panel.add_widget(rhymes_tab)
+        analysis_panel.add_widget(phonetics_tab)
+        analysis_panel.add_widget(meter_tab)
+        analysis_panel.add_widget(rhyme_scheme_tab)
+        
+        splitter.add_widget(analysis_panel)
+        main_layout.add_widget(splitter)
         
         return main_layout
     
-    def init_audio(self):
-        """Initialize audio system"""
-        if PYGAME_AVAILABLE:
-            try:
-                pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
-                self.update_status("Audio initialized (pygame)")
-            except:
-                self.update_status("Audio initialization failed")
-        else:
-            self.update_status("Audio not available - install pygame")
-    
-    def update_status(self, message):
-        """Update status bar"""
-        self.status_label.text = f"Status: {message}"
-    
-    def play_piano_key(self, button):
-        """Play individual piano key"""
-        note_name = button.note_name
-        self.update_status(f"Playing {note_name}")
-        
-        # Visual feedback
-        original_color = button.background_color
-        button.background_color = (0.8, 0.8, 0.2, 1)  # Yellow when pressed
-        
-        def reset_color(dt):
-            button.background_color = original_color
-        
-        Clock.schedule_once(reset_color, 0.2)
-        
-        if MUSIC21_AVAILABLE:
-            try:
-                # Create and play single note with better sound
-                n = note.Note(note_name, quarterLength=1)
-                n.volume.velocity = 80
-                s = stream.Stream()
-                s.append(tempo.TempoIndication(number=120))
-                s.append(n)
-                
-                # Use threading to avoid blocking UI
-                self.play_stream_quick(s)
-            except Exception as e:
-                self.update_status(f"Error playing note: {e}")
-    
-    
-    def play_music(self, button):
-        """Play current composition"""
-        if self.is_playing:
+    def analyze_poem(self, text):
+        """Analyze the current poem text"""
+        if not text.strip():
             return
-
-        try:
-            # Try to get music from piano roll
-            stream_obj = self.piano_roll.get_music21_stream()
-
-            # Fallback: use last code result if piano roll is empty
-            if (not stream_obj or len(stream_obj.notes) == 0) and self.current_stream:
-                stream_obj = self.current_stream
-
-            if stream_obj and len(stream_obj.notes) > 0:
-                self.current_stream = stream_obj
-                self.is_playing = True
-                self.play_btn.text = '⏸ Pause'
-                self.update_status("Playing...")
-
-                # Play in separate thread
-                threading.Thread(target=self.play_stream_threaded, args=(stream_obj,)).start()
-            else:
-                self.update_status("No notes to play")
-        except Exception as e:
-            self.update_status(f"Playback error: {e}")
-
-
-    def play_stream_threaded(self, stream_obj):
-        """Play music21 stream in separate thread"""
-        try:
-            if MUSIC21_AVAILABLE:
-                # Try to use music21's built-in playback
-                try:
-                    # Create temporary MIDI file for playback
-                    temp_dir = tempfile.gettempdir()
-                    temp_file = os.path.join(temp_dir, "sridaw_temp.mid")
-                    
-                    # Write MIDI file
-                    stream_obj.write('midi', fp=temp_file)
-                    
-                    # Play using pygame if available
-                    if PYGAME_AVAILABLE:
-                        pygame.mixer.music.load(temp_file)
-                        pygame.mixer.music.play()
-                        
-                        # Wait for playback to finish
-                        while pygame.mixer.music.get_busy():
-                            pygame.time.wait(100)
-                    
-                    # Clean up
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                        
-                except Exception as e:
-                    print(f"Playback error: {e}")
-                    
-        except Exception as e:
-            print(f"Stream playback error: {e}")
-        finally:
-            # Reset play state
-            Clock.schedule_once(self.reset_play_state, 0)
-    
-    def play_stream_quick(self, stream_obj):
-        """Quick playback for single notes"""
-        try:
-            if PYGAME_AVAILABLE and stream_obj:
-                # Create temporary MIDI file for quick playback
-                temp_dir = tempfile.gettempdir()
-                temp_file = os.path.join(temp_dir, f"sridaw_quick_{id(stream_obj)}.mid")
-                
-                # Write and play MIDI file
-                stream_obj.write('midi', fp=temp_file)
-                
-                # Non-blocking playback
-                def play_quick():
-                    try:
-                        pygame.mixer.music.load(temp_file)
-                        pygame.mixer.music.play(loops=0)
-                        # Clean up after a short delay
-                        Clock.schedule_once(lambda dt: self.cleanup_temp_file(temp_file), 2)
-                    except Exception as e:
-                        print(f"Quick playback error: {e}")
-                
-                threading.Thread(target=play_quick, daemon=True).start()
-        except Exception as e:
-            print(f"Stream quick play error: {e}")
-    
-    def cleanup_temp_file(self, filepath):
-        """Clean up temporary files"""
-        try:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-        except Exception as e:
-            print(f"Cleanup error: {e}")
-    
-    def play_demo(self, button):
-        """Play a demo composition"""
-        try:
-            if MUSIC21_AVAILABLE:
-                # Create a nice demo composition
-                s = stream.Stream()
-                s.append(tempo.TempoIndication(number=120))
-                s.append(meter.TimeSignature('4/4'))
-                s.append(key.KeySignature(0))  # C major
-                
-                # Melody: Twinkle Twinkle Little Star
-                melody = [
-                    ('C4', 1), ('C4', 1), ('G4', 1), ('G4', 1),
-                    ('A4', 1), ('A4', 1), ('G4', 2),
-                    ('F4', 1), ('F4', 1), ('E4', 1), ('E4', 1),
-                    ('D4', 1), ('D4', 1), ('C4', 2)
-                ]
-                
-                offset = 0
-                for note_name, dur in melody:
-                    n = note.Note(note_name, quarterLength=dur)
-                    n.volume.velocity = 70
-                    n.offset = offset
-                    offset += dur
-                    s.append(n)
-                
-                # Add some harmony
-                harmony_notes = [
-                    ('C3', 4, 0), ('F3', 4, 4), ('G3', 4, 8), ('C3', 4, 12)
-                ]
-                
-                for note_name, dur, offset_time in harmony_notes:
-                    n = note.Note(note_name, quarterLength=dur)
-                    n.volume.velocity = 50
-                    n.offset = offset_time
-                    s.append(n)
-                
-                self.current_stream = s
-                self.update_status("Playing demo composition...")
-                
-                # Play the demo
-                if not self.is_playing:
-                    self.is_playing = True
-                    self.play_btn.text = '⏸ Pause'
-                    threading.Thread(target=self.play_stream_threaded, args=(s,)).start()
-            else:
-                self.update_status("Music21 not available for demo")
-        except Exception as e:
-            self.update_status(f"Demo error: {e}")
-    
-    def reset_play_state(self, dt):
-        """Reset play button state"""
-        self.is_playing = False
-        self.play_btn.text = '▶ Play'
-        self.update_status("Playback finished")
-    
-    def stop_music(self, button):
-        """Stop music playback"""
-        if PYGAME_AVAILABLE:
-            pygame.mixer.music.stop()
         
-        self.is_playing = False
-        self.play_btn.text = '▶ Play'
-        self.update_status("Stopped")
-    
-    def toggle_record(self, button):
-        """Toggle recording mode"""
-        # Placeholder for recording functionality
-        self.update_status("Recording not implemented yet")
-    
-    def run_code(self, button):
-        """Execute code from editor"""
-        code = self.code_editor.text
+        # Update meter analysis
+        meter_data = self.analyzer.analyze_meter(text)
+        meter_text = f"Meter Analysis:\n\n"
         
-        try:
-            # Create execution environment
-            exec_globals = {
-                'stream': stream if MUSIC21_AVAILABLE else None,
-                'note': note if MUSIC21_AVAILABLE else None,
-                'pitch': pitch if MUSIC21_AVAILABLE else None,
-                'duration': duration if MUSIC21_AVAILABLE else None,
-                'tempo': tempo if MUSIC21_AVAILABLE else None,
-                'meter': meter if MUSIC21_AVAILABLE else None,
-                'key': key if MUSIC21_AVAILABLE else None,
-                'scale': scale if MUSIC21_AVAILABLE else None,
-            }
+        if meter_data['lines']:
+            meter_text += f"Lines: {len(meter_data['lines'])}\n"
+            meter_text += f"Consistency: {meter_data['consistency']:.1%}\n\n"
             
-            exec_locals = {}
-            
-            # Execute code
-            exec(code, exec_globals, exec_locals)
-            
-            # Check if result is a stream
-            if 'result' in exec_locals and MUSIC21_AVAILABLE:
-                result = exec_locals['result']
-                if hasattr(result, 'notes'):  # It's likely a music21 stream
-                    self.current_stream = result
-                    self.update_status(f"Code executed - {len(result.notes)} notes generated")
-                else:
-                    self.update_status("Code executed successfully")
-            else:
-                self.update_status("Code executed successfully")
-                
-        except Exception as e:
-            self.update_status(f"Code error: {str(e)}")
+            for i, line_data in enumerate(meter_data['lines'], 1):
+                meter_text += f"Line {i}: {line_data['syllables']} syllables\n"
+                meter_text += f"  {line_data['text']}\n"
+                meter_text += f"  Pattern: {line_data['stress_pattern']}\n\n"
+        
+        self.meter_results.text = meter_text
+        self.meter_results.text_size = (dp(300), None)
+        
+        # Update visual meter
+        self.visual_meter.set_meter_data(meter_data)
+        
+        # Update rhyme scheme analysis
+        rhyme_data = self.analyzer.analyze_rhyme_scheme(text)
+        rhyme_text = f"Rhyme Scheme Analysis:\n\n"
+        rhyme_text += f"Scheme: {rhyme_data['scheme']}\n\n"
+        
+        for i, line in enumerate(rhyme_data['lines']):
+            scheme_letter = rhyme_data['scheme'].split()[i] if i < len(rhyme_data['scheme'].split()) else '-'
+            rhyme_text += f"{scheme_letter}: {line}\n"
+        
+        if rhyme_data['groups']:
+            rhyme_text += "\nRhyme Groups:\n"
+            for letter, words in rhyme_data['groups'].items():
+                rhyme_text += f"{letter}: {', '.join(words)}\n"
+        
+        self.rhyme_scheme_results.text = rhyme_text
+        self.rhyme_scheme_results.text_size = (dp(300), None)
     
-    def export_midi(self, button):
-        """Export current composition as MIDI file"""
-        try:
-            # Get stream from piano roll or code execution
-            stream_obj = self.current_stream or self.piano_roll.get_music21_stream()
-            
-            if stream_obj and MUSIC21_AVAILABLE:
-                # Create file chooser popup
-                content = BoxLayout(orientation='vertical')
-                
-                # File path input
-                path_input = TextInput(text='composition.mid', multiline=False)
-                content.add_widget(Label(text='Enter filename:', size_hint_y=0.3))
-                content.add_widget(path_input)
-                
-                # Buttons
-                btn_layout = BoxLayout(size_hint_y=0.3)
-                save_btn = Button(text='Save')
-                cancel_btn = Button(text='Cancel')
-                
-                popup = Popup(title='Export MIDI', content=content, size_hint=(0.8, 0.6))
-                
-                def save_midi(btn):
-                    try:
-                        filename = path_input.text
-                        if not filename.endswith('.mid'):
-                            filename += '.mid'
-                        
-                        stream_obj.write('midi', fp=filename)
-                        self.update_status(f"MIDI exported: {filename}")
-                        popup.dismiss()
-                    except Exception as e:
-                        self.update_status(f"Export error: {e}")
-                
-                save_btn.bind(on_press=save_midi)
-                cancel_btn.bind(on_press=popup.dismiss)
-                
-                btn_layout.add_widget(save_btn)
-                btn_layout.add_widget(cancel_btn)
-                content.add_widget(btn_layout)
-                
-                popup.open()
-            else:
-                self.update_status("No composition to export")
-                
-        except Exception as e:
-            self.update_status(f"Export error: {e}")
+    def lookup_word(self, word):
+        """Look up word definition"""
+        if not word.strip():
+            return
+        
+        definitions = self.analyzer.get_word_definition(word)
+        result_text = f"Definitions for '{word}':\n\n"
+        
+        for i, definition in enumerate(definitions, 1):
+            result_text += f"{i}. {definition}\n\n"
+        
+        self.dict_results.text = result_text
+        self.dict_results.text_size = (dp(300), None)
     
-    def export_code(self, button):
-        """Export current code to file"""
+    def find_rhymes(self, word):
+        """Find rhyming words"""
+        if not word.strip():
+            return
+        
+        rhymes = self.analyzer.get_rhymes(word)
+        if rhymes:
+            result_text = f"Rhymes for '{word}':\n\n"
+            result_text += ', '.join(rhymes)
+        else:
+            result_text = f"No rhymes found for '{word}'"
+        
+        self.rhyme_results.text = result_text
+        self.rhyme_results.text_size = (dp(300), None)
+    
+    def get_phonetics(self, word):
+        """Get phonetic representation"""
+        if not word.strip():
+            return
+        
+        phonetics = self.analyzer.get_phonetics(word)
+        syllables = self.analyzer.count_syllables(word)
+        
+        result_text = f"Phonetics for '{word}':\n\n"
+        result_text += f"Pronunciation: {phonetics}\n"
+        result_text += f"Syllables: {syllables}\n"
+        
+        self.phonetic_results.text = result_text
+        self.phonetic_results.text_size = (dp(300), None)
+    
+    def new_poem(self, instance):
+        """Create new poem"""
+        self.poem_editor.text = ""
+    
+    def save_poem(self, instance):
+        """Save poem to file"""
         try:
-            content = BoxLayout(orientation='vertical')
+            # Simple file saving - in real app, would use file dialog
+            filename = "my_poem.txt"
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(self.poem_editor.text)
             
-            # File path input
-            path_input = TextInput(text='composition.py', multiline=False)
-            content.add_widget(Label(text='Enter filename:', size_hint_y=0.3))
-            content.add_widget(path_input)
-            
-            # Buttons
-            btn_layout = BoxLayout(size_hint_y=0.3)
-            save_btn = Button(text='Save')
-            cancel_btn = Button(text='Cancel')
-            
-            popup = Popup(title='Export Code', content=content, size_hint=(0.8, 0.6))
-            
-            def save_code(btn):
-                try:
-                    filename = path_input.text
-                    if not filename.endswith('.py'):
-                        filename += '.py'
-                    
-                    with open(filename, 'w') as f:
-                        f.write(self.code_editor.text)
-                    
-                    self.update_status(f"Code exported: {filename}")
-                    popup.dismiss()
-                except Exception as e:
-                    self.update_status(f"Export error: {e}")
-            
-            save_btn.bind(on_press=save_code)
-            cancel_btn.bind(on_press=popup.dismiss)
-            
-            btn_layout.add_widget(save_btn)
-            btn_layout.add_widget(cancel_btn)
-            content.add_widget(btn_layout)
-            
+            popup = Popup(title='Saved',
+                         content=Label(text=f'Poem saved as {filename}'),
+                         size_hint=(0.6, 0.4))
             popup.open()
-            
         except Exception as e:
-            self.update_status(f"Export error: {e}")
+            popup = Popup(title='Error',
+                         content=Label(text=f'Could not save: {str(e)}'),
+                         size_hint=(0.6, 0.4))
+            popup.open()
+    
+    def load_poem(self, instance):
+        """Load poem from file"""
+        try:
+            # Simple file loading - in real app, would use file dialog
+            filename = "my_poem.txt"
+            if os.path.exists(filename):
+                with open(filename, 'r', encoding='utf-8') as f:
+                    self.poem_editor.text = f.read()
+            else:
+                popup = Popup(title='Not Found',
+                             content=Label(text=f'File {filename} not found'),
+                             size_hint=(0.6, 0.4))
+                popup.open()
+        except Exception as e:
+            popup = Popup(title='Error',
+                         content=Label(text=f'Could not load: {str(e)}'),
+                         size_hint=(0.6, 0.4))
+            popup.open()
+
 
 if __name__ == '__main__':
-    # Check dependencies
-    if not MUSIC21_AVAILABLE:
-        print("Warning: music21 not available. Install with: pip install music21")
-    
-    if not PYGAME_AVAILABLE:
-        print("Warning: pygame not available. Install with: pip install pygame")
-    
-    # Run the app
-    SriDAWApp().run()
+    VersePadApp().run()
