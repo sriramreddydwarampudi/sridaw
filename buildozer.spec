@@ -5,7 +5,7 @@ package.domain = org.sriram
 source.dir = .
 source.include_exts = py,kv,png,jpg,ttf,wav,mp3
 version = 1.0
-requirements = python3,kivy==2.3.0,music21,pygame==2.1.0,pygments
+requirements = python3,kivy==2.3.0,music21,pygame==2.0.1,pygments
 orientation = landscape
 fullscreen = 1
 entrypoint = main.py
