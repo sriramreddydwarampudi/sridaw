@@ -21,27 +21,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install buildozer cython
 
-      - name: Cache Buildozer dependencies
-        uses: actions/cache@v4
-        with:
-          path: .buildozer
-          key: ${{ runner.os }}-buildozer-${{ hashFiles('**/*.py') }}
-          restore-keys: |
-            ${{ runner.os }}-buildozer-
-
       - name: Build APK with Buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         with:
           command: buildozer android debug
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: music21daw-debug-apk
-          path: bin/*.apk
-
       - name: Show Build Logs (on failure)
         if: failure()
         run: |
           echo "=== Showing last 100 lines of buildozer_output.log ==="
-          tail -n 100 .buildozer/android/platform/build-arm64-v8a/build/buildozer_output.txt || echo "Log file not found"
+          tail -n 100 buildozer_output.log || echo "Log file not found"
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: music21daw-debug-apk
+          path: bin/*.apk
