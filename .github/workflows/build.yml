@@ -11,30 +11,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
+      - name: Set up Buildozer dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install buildozer cython
+          sudo apt update
+          sudo apt install -y zip unzip libtool
 
-      - name: Build APK with Buildozer
+      - name: Run Buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         with:
+          workdir: .
           command: buildozer android debug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release.apk
+          path: bin/*.apk
 
       - name: Show Build Logs (on failure)
         if: failure()
         run: |
-          echo "=== Showing last 100 lines of buildozer_output.log ==="
-          tail -n 100 buildozer_output.log || echo "Log file not found"
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: music21daw-debug-apk
-          path: bin/*.apk
+          echo "=== Last 100 lines of buildozer log ==="
+          tail -n 100 .buildozer/android/platform/build-arm64-v8a/build/outputs/logs/buildozer.log || echo "Log not found"
