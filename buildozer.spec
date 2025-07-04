@@ -6,16 +6,16 @@ package.domain = org.yourdomain
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,mid
 version = 1.0
-requirements = python3,kivy,pyjnius,music21
+requirements = python3,kivy,music21,git+https://github.com/kivy/pyjnius.git@master
 orientation = portrait
 fullscreen = 0
 osx.kivy_version = 2.2.1
 
 android.permissions = READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
-android.api = 31
+android.api = 33
 android.minapi = 21
 android.ndk = 25b
-android.ndk_api = 21
+android.ndk_api = 33
 android.archs = arm64-v8a
 
 # Include MIDI file handling and optional SoundFont if needed
