@@ -27,8 +27,7 @@ android.allow_backup = 1
 android.private_storage = False
 android.additional_jars = 
 
-# For MediaPlayer and Uri usage
-android.gradle_dependencies = androidx.core:core:1.10.1
+
 
 # For Android storage access (internal app dir or external SDCard)
 android.use_android_support = True
