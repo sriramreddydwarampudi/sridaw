@@ -7,6 +7,7 @@ version = 1.0
 requirements = python3,kivy==2.3.0,pygments,music21,numpy,matplotlib,jnius,android
 orientation = portrait
 osx.kivy_version = 2.3.0
+source.dir = .
 
 [buildozer]
 log_level = 2
