@@ -1,59 +1,37 @@
 name: Build
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-android:
-    name: Build for Android
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y zip unzip libtool autoconf automake
-          pip install buildozer cython
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install buildozer
 
-      - name: Install Android SDK Build Tools
-        run: |
-          sudo apt-get install -y wget unzip openjdk-17-jdk
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
-          unzip cmdline-tools.zip -d $HOME/android-sdk/cmdline-tools
-          mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
-          export ANDROID_HOME=$HOME/android-sdk
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
-          yes | sdkmanager --licenses
-          sdkmanager "build-tools;34.0.0" "platform-tools" "platforms;android-34"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-          echo "PATH=$PATH" >> $GITHUB_ENV
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
 
-      - name: Patch Kivy common.pxi
-        run: |
-          # Workaround for redeclaration warnings
-          find . -name common.pxi -exec sed -i "s/ctypedef char \* const_char_ptr/ctypedef const char \* const_char_ptr/" {} \;
-          find . -name common.pxi -exec sed -i "/size_t/d" {} \;
+    - name: Install required Android SDK packages
+      run: |
+        yes | sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+        ls $ANDROID_HOME/build-tools
 
-      - name: Run Buildozer
-        run: |
-          buildozer android debug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-release.apk
-          path: bin/*.apk
-
-      - name: Show Build Logs (on failure)
-        if: failure()
-        run: |
-          echo "=== Last 100 lines of buildozer log ==="
-          tail -n 100 .buildozer/android/platform/build-arm64-v8a/build/outputs/logs/buildozer.log || echo "Log not found"
+    - name: Build with Buildozer
+      run: |
+        buildozer android debug
