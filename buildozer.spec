@@ -9,7 +9,7 @@ version = 1.0
 orientation = portrait
 
 # Requirements with pinned versions for stability
-requirements = 
+requirements =
     python3,
     kivy==2.3.0,
     pygments,
