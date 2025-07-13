@@ -2,7 +2,54 @@
 """
 Enhanced Music21 Visual DAW - Scale Interval Display with Horizontal Scroll
 """
+#!/usr/bin/env python3
+"""
+Enhanced Music21 Visual DAW - Scale Interval Display with Horizontal Scroll
+"""
 
+import sys
+import os
+from os.path import join
+from android.storage import app_storage_path
+
+# Add install directory to path
+target = join(app_storage_path(), 'python')
+if target not in sys.path:
+    sys.path.append(target)
+
+# Runtime dependency check and install
+def ensure_dependencies():
+    missing = []
+    required = [
+        'kivy', 'pygments', 'music21', 'numpy',
+        'matplotlib', 'jnius', 'chardet', 'webcolors'
+    ]
+    
+    for package in required:
+        try:
+            __import__(package)
+        except ImportError:
+            missing.append(package)
+    
+    if missing:
+        print(f"Missing packages: {missing}, attempting install...")
+        try:
+            import subprocess
+            subprocess.run([
+                sys.executable, 
+                '-m', 'pip', 
+                'install', 
+                '--target', target,
+                *missing
+            ], check=True)
+            print("Installation completed")
+        except Exception as e:
+            print(f"Install failed: {e}")
+            raise
+
+ensure_dependencies()
+
+# Now import the rest normally
 import kivy
 kivy.require('2.0.0')
 
@@ -21,6 +68,8 @@ from kivy.lang import Builder
 from kivy.core.clipboard import Clipboard
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
+
+
 
 import os
 import platform
