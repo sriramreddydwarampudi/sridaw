@@ -6,10 +6,12 @@ package.domain = org.yourdomain
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf,mid
 version = 1.0
-requirements = python3,kivy,music21,git+https://github.com/kivy/pyjnius.git@master
+requirements = python3,kivy==2.2.1,music21,git+https://github.com/kivy/pyjnius.git@master
+android.gradle_dependencies = androidx.core:core:1.10.1
 orientation = portrait
 fullscreen = 0
 osx.kivy_version = 2.2.1
+cython_directives = language_level=3
 
 android.permissions = READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 android.api = 33
