@@ -11,16 +11,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Buildozer dependencies
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y zip unzip libtool
+          sudo apt install -y zip unzip libtool autoconf automake
+          pip install buildozer cython
+
+      - name: Patch Kivy common.pxi
+        run: |
+          # Workaround for redeclaration warnings
+          find . -name common.pxi -exec sed -i "s/ctypedef char \* const_char_ptr/ctypedef const char \* const_char_ptr/" {} \;
+          find . -name common.pxi -exec sed -i "/size_t/d" {} \;
 
       - name: Run Buildozer
-        uses: ArtemSBulgakov/buildozer-action@v1
-        with:
-          workdir: .
-          command: buildozer android debug
+        run: |
+          buildozer android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
