@@ -37,6 +37,11 @@ android.minapi = 21
 android.ndk = 25b
 android.sdk = 24
 
+# Do NOT set android.ndk_path unless you have a valid, accessible path.
+# Comment out or remove any android.ndk_path line.
+# Example:
+# android.ndk_path =
+
 # Permissions
 android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET,RECORD_AUDIO
 
