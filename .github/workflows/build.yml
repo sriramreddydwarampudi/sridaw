@@ -22,6 +22,20 @@ jobs:
           sudo apt install -y zip unzip libtool autoconf automake
           pip install buildozer cython
 
+      - name: Install Android SDK Build Tools
+        run: |
+          sudo apt-get install -y wget unzip openjdk-17-jdk
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          wget https://dl.google.com/android/repository/commandlinetools-linux-10406996_latest.zip -O cmdline-tools.zip
+          unzip cmdline-tools.zip -d $HOME/android-sdk/cmdline-tools
+          mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+          yes | sdkmanager --licenses
+          sdkmanager "build-tools;34.0.0" "platform-tools" "platforms;android-34"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "PATH=$PATH" >> $GITHUB_ENV
+
       - name: Patch Kivy common.pxi
         run: |
           # Workaround for redeclaration warnings
