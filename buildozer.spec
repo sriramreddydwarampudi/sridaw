@@ -18,8 +18,6 @@ android.ndk_api = 33
 # Permissions for saving/loading files
 android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
-# Include MIDI output
-android.add_jars = 
 android.add_assets = assets/
 
 # Force pip install of music21 (no wheels)
