@@ -4,14 +4,21 @@ package.name = sridaw
 package.domain = org.example
 source.include_exts = py,png,jpg,kv,atlas,ttf
 version = 1.0
-requirements = python3,kivy==2.3.0,pygments,numpy,matplotlib,jnius,android
 orientation = portrait
 osx.kivy_version = 2.3.0
 source.dir = .
+requirements = python3,kivy==2.2.1,pyjnius
+android.arch = armeabi-v7a
+
+
+
+[p4a]
+cythonize = true
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
+force_build = 1
 
 [app.android]
 # Optional: uncomment to fix version
