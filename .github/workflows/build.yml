@@ -24,7 +24,7 @@ jobs:
         with:
           workdir: .
           buildozer_version: stable
-          command: android debug
+          command: buildozer android debug
 
       - name: 📤 Upload built APK
         if: success()
