@@ -23,7 +23,8 @@ android.add_jars =
 android.add_assets = assets/
 
 # Force pip install of music21 (no wheels)
-p4a.extra_args = --extra-pip-args="--no-deps"
+[compiler_directives]
+language_level = 3
 
 # If you're using custom fonts
 # android.presplash = presplash.png
