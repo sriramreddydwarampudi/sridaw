@@ -1,35 +1,42 @@
 [app]
-
-title = Music21DAW
-package.name = music21daw
-package.domain = org.kivy.music21
-source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf,mid
+title = SriDAW
+package.name = sridaw
+package.domain = org.example
+source.include_exts = py,png,jpg,kv,atlas,ttf
 version = 1.0
-requirements = python3,kivy,pyjnius
+requirements = python3,kivy==2.3.0,pygments,numpy,matplotlib,jnius,android
 orientation = portrait
-fullscreen = 1
-android.api = 33
-android.minapi = 33
-android.target = 33
-android.ndk = 25b
-android.ndk_api = 33
-
-# Permissions for saving/loading files
-android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-
-android.add_assets = assets/
-
-# Force pip install of music21 (no wheels)
-[compiler_directives]
-language_level = 3
-
-# If you're using custom fonts
-# android.presplash = presplash.png
-
-# Keep default launcher icon
-# icon.filename = %(source.dir)s/icon.png
+osx.kivy_version = 2.3.0
+source.dir = .
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
+
+[app.android]
+# Optional: uncomment to fix version
+android.api = 30
+android.minapi = 21
+android.ndk = 25b
+android.gradle_dependencies = 
+android.sdk = 24
+# Optional: increase if needed
+android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET
+android.add_libs_armeabi_v7a = libfluidsynth.so
+
+# Matplotlib backend configuration
+android.env_vars = MPLBACKEND=agg
+
+[app.android.entrypoint]
+main = main:Music21DAW().run()
+
+[app:source.exclude_patterns]
+# Exclude unnecessary files
+license
+images/
+doc/
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
