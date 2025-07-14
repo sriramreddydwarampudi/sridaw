@@ -10,6 +10,8 @@ jobs:
     steps:
       - name: 📦 Checkout repository
         uses: actions/checkout@v4
+      - name: Clean previous builds
+        run: rm -rf .buildozer
 
       - name: 🧹 Clean Buildozer cache (optional but safe)
         run: |
