@@ -1,0 +1,1 @@
+# minimal articulations module
