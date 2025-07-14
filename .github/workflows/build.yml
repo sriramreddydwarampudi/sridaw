@@ -6,19 +6,33 @@ jobs:
   build-android:
     name: Build for Android
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
+      - name: 📦 Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build APK with Buildozer
+      - name: 🧹 Clean Buildozer cache (optional but safe)
+        run: |
+          sudo pip install buildozer
+          buildozer android clean || true
+
+      - name: 🔨 Build APK with Buildozer
         uses: ArtemSBulgakov/buildozer-action@v1
         id: buildozer
         with:
-          workdir: . # Since buildozer.spec is in the root
+          workdir: .
           buildozer_version: stable
+          command: android debug
 
-      - name: Upload built APK
+      - name: 📤 Upload built APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: MyApp-APK
+          name: Music21DAW-APK
           path: ${{ steps.buildozer.outputs.filename }}
+
+      - name: 🚨 Show logs on failure
+        if: failure()
+        run: |
+          echo "Build failed. Showing logs..."
+          cat .buildozer/android/platform/build-arm64-v8a/build/output.txt || true
