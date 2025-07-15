@@ -8,7 +8,6 @@ orientation = portrait
 osx.kivy_version = 2.3.0
 source.dir = .
 requirements = python3,kivy==2.2.1,pyjnius
-android.arch = armeabi-v7a
 
 
 
