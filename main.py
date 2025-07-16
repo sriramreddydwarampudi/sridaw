@@ -690,7 +690,29 @@ result = s
                     self.layout.ids.piano_roll.scroll_view = self.layout.ids.piano_scroll
                     self.layout.ids.piano_roll.update_from_stream(self.current_stream)
                 except:
-                    Logger.error("SriDAW: Could not update piano roll")
+    log_msg = f"[{timestamp}] SriDAW-{level}: {message}"
+    
+    # Always use Kivy logger
+    if level == "ERROR":
+        Logger.error(f"SriDAW: {message}")
+    elif level == "WARN":
+        Logger.warning(f"SriDAW: {message}")
+    else:
+        Logger.info(f"SriDAW: {message}")
+    
+    # Also print to stdout for ADB logcat
+    print(log_msg)
+    
+    # On Android, also log to system
+    if ANDROID:
+        try:
+            import android
+            android.log(log_msg)
+        except:
+            pass
+
+debug_log("Starting application...")
+
                 
                 # Get tempo
                 try:
