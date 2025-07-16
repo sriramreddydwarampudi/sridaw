@@ -34,7 +34,32 @@ import sys
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-Logger.info("SriDAW: Starting application...")
+# Enhanced logging for debugging
+def debug_log(message, level="INFO"):
+    """Enhanced logging that works on both desktop and Android"""
+    timestamp = time.strftime("%H:%M:%S")
+    log_msg = f"[{timestamp}] SriDAW-{level}: {message}"
+    
+    # Always use Kivy logger
+    if level == "ERROR":
+        Logger.error(f"SriDAW: {message}")
+    elif level == "WARN":
+        Logger.warning(f"SriDAW: {message}")
+    else:
+        Logger.info(f"SriDAW: {message}")
+    
+    # Also print to stdout for ADB logcat
+    print(log_msg)
+    
+    # On Android, also log to system
+    if ANDROID:
+        try:
+            import android
+            android.log(log_msg)
+        except:
+            pass
+
+debug_log("Starting application...")
 
 # Detect Android environment
 ANDROID = False
@@ -46,18 +71,18 @@ try:
     SDK_INT = VERSION.SDK_INT
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
     Context = PythonActivity.mActivity
-    Logger.info("SriDAW: Android environment detected")
+    debug_log(f"Android environment detected, SDK: {SDK_INT}")
 except Exception as e:
-    Logger.info(f"SriDAW: Desktop environment (Android imports failed): {e}")
+    debug_log(f"Desktop environment (Android imports failed): {e}")
 
 # Import music21 with error handling
 MUSIC21_AVAILABLE = False
 try:
     from music21 import stream, note, tempo, chord, dynamics, articulations
     MUSIC21_AVAILABLE = True
-    Logger.info("SriDAW: music21 imported successfully!")
+    debug_log("music21 imported successfully!")
 except ImportError as e:
-    Logger.error(f"SriDAW: music21 import failed: {e}")
+    debug_log(f"music21 import failed: {e}", "ERROR")
     # Create dummy modules to prevent crashes
     class DummyModule:
         def __getattr__(self, name):
@@ -84,15 +109,15 @@ def register_fonts():
         for path in font_paths:
             if os.path.exists(path):
                 LabelBase.register(name="Mono", fn_regular=path)
-                Logger.info(f"SriDAW: Using font: {path}")
+                debug_log(f"Using font: {path}")
                 return True
         
         # Fallback to default
         LabelBase.register(name="Mono", fn_regular=LabelBase.default_font)
-        Logger.info("SriDAW: Using default font")
+        debug_log("Using default font")
         return True
     except Exception as e:
-        Logger.error(f"SriDAW: Font registration failed: {e}")
+        debug_log(f"Font registration failed: {e}", "ERROR")
         return False
 
 register_fonts()
@@ -263,9 +288,9 @@ try:
             size_hint_y: 0.1
             on_press: root.dismiss()
 ''')
-    Logger.info("SriDAW: UI layout loaded successfully")
+    debug_log("UI layout loaded successfully")
 except Exception as e:
-    Logger.error(f"SriDAW: Failed to load UI layout: {e}")
+    debug_log(f"Failed to load UI layout: {e}", "ERROR")
     # Create minimal fallback layout
     Builder.load_string('''
 <MainLayout>:
@@ -318,9 +343,9 @@ class PianoRollWidget(BoxLayout):
             self.selected_note = None
             self.note_popup = None
             self.scroll_view = None
-            Logger.info("SriDAW: PianoRollWidget initialized")
+            debug_log("PianoRollWidget initialized")
         except Exception as e:
-            Logger.error(f"SriDAW: PianoRollWidget init error: {e}")
+            debug_log(f"PianoRollWidget init error: {e}", "ERROR")
 
     def _init_key_colors(self):
         """Initialize colors for piano keys (black/white)"""
@@ -353,7 +378,7 @@ class PianoRollWidget(BoxLayout):
                         self.show_note_details(offset, pitch, duration, velocity)
                         return True
         except Exception as e:
-            Logger.error(f"SriDAW: Touch error: {e}")
+            debug_log(f"Touch error: {e}", "ERROR")
 
         return super().on_touch_down(touch)
 
@@ -386,7 +411,7 @@ class PianoRollWidget(BoxLayout):
             self.note_popup.note_details = details
             self.note_popup.open()
         except Exception as e:
-            Logger.error(f"SriDAW: Note details error: {e}")
+            debug_log(f"Note details error: {e}", "ERROR")
 
     def midi_to_note_name(self, midi_note):
         """Convert MIDI note number to note name"""
@@ -484,7 +509,7 @@ class PianoRollWidget(BoxLayout):
                             self.draw_text(note_name, x + dp(3), y + dp(2), dp(12))
 
         except Exception as e:
-            Logger.error(f"SriDAW: Canvas update error: {e}")
+            debug_log(f"Canvas update error: {e}", "ERROR")
 
     def draw_rounded_rect(self, x, y, w, h, r):
         try:
@@ -497,7 +522,7 @@ class PianoRollWidget(BoxLayout):
             Ellipse(pos=(x, y + h - 2*r), size=(2*r, 2*r))
             Ellipse(pos=(x + w - 2*r, y + h - 2*r), size=(2*r, 2*r))
         except Exception as e:
-            Logger.error(f"SriDAW: Draw rect error: {e}")
+            debug_log(f"Draw rect error: {e}", "ERROR")
 
     def draw_text(self, text, x, y, font_size, center=False):
         try:
@@ -510,7 +535,7 @@ class PianoRollWidget(BoxLayout):
             pos = (x - texture.width/2, y - texture.height/2) if center else (x, y)
             Rectangle(texture=texture, pos=pos, size=texture.size)
         except Exception as e:
-            Logger.error(f"SriDAW: Draw text error: {e}")
+            debug_log(f"Draw text error: {e}", "ERROR")
 
     def _update_playhead(self, *args):
         try:
@@ -528,7 +553,7 @@ class PianoRollWidget(BoxLayout):
                     scroll_x_norm = max(0, (x_pos - vp_width / 2) / (self.width - vp_width))
                     self.scroll_view.scroll_x = min(1.0, scroll_x_norm)
         except Exception as e:
-            Logger.error(f"SriDAW: Playhead update error: {e}")
+            debug_log(f"Playhead update error: {e}", "ERROR")
 
     def update_from_stream(self, music_stream):
         try:
@@ -573,14 +598,14 @@ class PianoRollWidget(BoxLayout):
             self.height = max(dp(100), len(self.visible_pitches) * dp(18))
             
         except Exception as e:
-            Logger.error(f"SriDAW: Stream update error: {e}")
+            debug_log(f"Stream update error: {e}", "ERROR")
 
 class Music21DAW(App):
     status_text = StringProperty("Ready")
 
     def build(self):
         try:
-            Logger.info("SriDAW: Building app...")
+            debug_log("Building app...")
             self.title = "Music21 Visual DAW"
             self.layout = MainLayout()
             
@@ -624,11 +649,11 @@ result = s
             # Run demo code after a delay
             Clock.schedule_once(lambda dt: self.run_code(), 1.0)
             
-            Logger.info("SriDAW: App built successfully")
+            debug_log("App built successfully")
             return self.layout
             
         except Exception as e:
-            Logger.error(f"SriDAW: Build error: {e}")
+            debug_log(f"Build error: {e}", "ERROR")
             # Return minimal layout on error
             from kivy.uix.label import Label
             return Label(text=f"SriDAW Error: {e}")
