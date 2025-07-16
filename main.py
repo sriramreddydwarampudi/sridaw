@@ -1,6 +1,3 @@
-import sys, os
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
 #!/usr/bin/env python3
 """
 Enhanced Music21 Visual DAW - Scale Interval Display with Horizontal Scroll
@@ -24,6 +21,7 @@ from kivy.lang import Builder
 from kivy.core.clipboard import Clipboard
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
+from kivy.logger import Logger
 
 import os
 import platform
@@ -31,8 +29,16 @@ import tempfile
 import subprocess
 import traceback
 import time
+import sys
 
-# Conditional imports
+# Add current directory to Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+Logger.info("SriDAW: Starting application...")
+
+# Detect Android environment
+ANDROID = False
+SDK_INT = 0
 try:
     from jnius import autoclass, cast, PythonJavaClass, java_method
     ANDROID = True
@@ -40,83 +46,111 @@ try:
     SDK_INT = VERSION.SDK_INT
     PythonActivity = autoclass('org.kivy.android.PythonActivity')
     Context = PythonActivity.mActivity
-    print("Android environment detected")
+    Logger.info("SriDAW: Android environment detected")
 except Exception as e:
-    ANDROID = False
-    SDK_INT = 0
-    print(f"Android imports failed (not Android?): {e}")
+    Logger.info(f"SriDAW: Desktop environment (Android imports failed): {e}")
 
-# Import our minimal music21 implementation
+# Import music21 with error handling
+MUSIC21_AVAILABLE = False
 try:
     from music21 import stream, note, tempo, chord, dynamics, articulations
     MUSIC21_AVAILABLE = True
-    print("music21 imported successfully!")
+    Logger.info("SriDAW: music21 imported successfully!")
 except ImportError as e:
-    MUSIC21_AVAILABLE = False
-    print(f"music21 import failed: {e}")
+    Logger.error(f"SriDAW: music21 import failed: {e}")
+    # Create dummy modules to prevent crashes
+    class DummyModule:
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+    
+    stream = note = tempo = chord = dynamics = articulations = DummyModule()
 
-# Font registration with fallbacks
-font_registered = False
-font_paths = [
-    '/system/fonts/RobotoMono-Regular.ttf',
-    '/system/fonts/DroidSansMono.ttf',
-    '/system/fonts/CutiveMono.ttf',
-]
-
-for path in font_paths:
+# Font registration with better error handling
+def register_fonts():
     try:
-        if os.path.exists(path):
-            LabelBase.register(name="Mono", fn_regular=path)
-            font_registered = True
-            print(f"Using font: {path}")
-            break
+        if ANDROID:
+            font_paths = [
+                '/system/fonts/RobotoMono-Regular.ttf',
+                '/system/fonts/DroidSansMono.ttf',
+                '/system/fonts/monospace.ttf',
+            ]
+        else:
+            font_paths = [
+                '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf',
+                '/System/Library/Fonts/Monaco.ttf',
+                '/Windows/Fonts/consola.ttf',
+            ]
+        
+        for path in font_paths:
+            if os.path.exists(path):
+                LabelBase.register(name="Mono", fn_regular=path)
+                Logger.info(f"SriDAW: Using font: {path}")
+                return True
+        
+        # Fallback to default
+        LabelBase.register(name="Mono", fn_regular=LabelBase.default_font)
+        Logger.info("SriDAW: Using default font")
+        return True
     except Exception as e:
-        print(f"Font registration failed for {path}: {e}")
+        Logger.error(f"SriDAW: Font registration failed: {e}")
+        return False
 
-if not font_registered:
-    LabelBase.register(name="Mono", fn_regular=LabelBase.default_font)
-    print("Using default font")
+register_fonts()
 
 # Android MediaPlayer Listeners
 if ANDROID:
-    class OnPreparedListener(PythonJavaClass):
-        __javainterfaces__ = ['android/media/MediaPlayer$OnPreparedListener']
-        __javacontext__ = 'app'
+    try:
+        class OnPreparedListener(PythonJavaClass):
+            __javainterfaces__ = ['android/media/MediaPlayer$OnPreparedListener']
+            __javacontext__ = 'app'
 
-        def __init__(self, callback):
-            super().__init__()
-            self.callback = callback
+            def __init__(self, callback):
+                super().__init__()
+                self.callback = callback
 
-        @java_method('(Landroid/media/MediaPlayer;)V')
-        def onPrepared(self, mp):
-            self.callback(mp)
+            @java_method('(Landroid/media/MediaPlayer;)V')
+            def onPrepared(self, mp):
+                try:
+                    self.callback(mp)
+                except Exception as e:
+                    Logger.error(f"SriDAW: OnPrepared error: {e}")
 
-    class OnCompletionListener(PythonJavaClass):
-        __javainterfaces__ = ['android/media/MediaPlayer$OnCompletionListener']
-        __javacontext__ = 'app'
+        class OnCompletionListener(PythonJavaClass):
+            __javainterfaces__ = ['android/media/MediaPlayer$OnCompletionListener']
+            __javacontext__ = 'app'
 
-        def __init__(self, callback):
-            super().__init__()
-            self.callback = callback
+            def __init__(self, callback):
+                super().__init__()
+                self.callback = callback
 
-        @java_method('(Landroid/media/MediaPlayer;)V')
-        def onCompletion(self, mp):
-            self.callback(mp)
+            @java_method('(Landroid/media/MediaPlayer;)V')
+            def onCompletion(self, mp):
+                try:
+                    self.callback(mp)
+                except Exception as e:
+                    Logger.error(f"SriDAW: OnCompletion error: {e}")
 
-    class OnErrorListener(PythonJavaClass):
-        __javainterfaces__ = ['android/media/MediaPlayer$OnErrorListener']
-        __javacontext__ = 'app'
+        class OnErrorListener(PythonJavaClass):
+            __javainterfaces__ = ['android/media/MediaPlayer$OnErrorListener']
+            __javacontext__ = 'app'
 
-        def __init__(self, callback):
-            super().__init__()
-            self.callback = callback
+            def __init__(self, callback):
+                super().__init__()
+                self.callback = callback
 
-        @java_method('(Landroid/media/MediaPlayer;II)Z')
-        def onError(self, mp, what, extra):
-            return self.callback(mp, what, extra)
+            @java_method('(Landroid/media/MediaPlayer;II)Z')
+            def onError(self, mp, what, extra):
+                try:
+                    return self.callback(mp, what, extra)
+                except Exception as e:
+                    Logger.error(f"SriDAW: OnError error: {e}")
+                    return True
+    except Exception as e:
+        Logger.error(f"SriDAW: Failed to create Android listeners: {e}")
 
-# UI Layout Definition
-Builder.load_string('''
+# UI Layout Definition with error handling
+try:
+    Builder.load_string('''
 <MainLayout>:
     orientation: 'vertical'
     spacing: dp(5)
@@ -135,7 +169,6 @@ Builder.load_string('''
             cursor_color: 1, 0.5, 0, 1
             cursor_width: dp(2)
             selection_color: 0.2, 0.5, 0.8, 0.4
-            base_direction: 'ltr'
             auto_indent: True
             tab_width: 4
             use_bubble: True
@@ -230,6 +263,20 @@ Builder.load_string('''
             size_hint_y: 0.1
             on_press: root.dismiss()
 ''')
+    Logger.info("SriDAW: UI layout loaded successfully")
+except Exception as e:
+    Logger.error(f"SriDAW: Failed to load UI layout: {e}")
+    # Create minimal fallback layout
+    Builder.load_string('''
+<MainLayout>:
+    orientation: 'vertical'
+    Label:
+        text: 'SriDAW - Loading Error'
+    Button:
+        text: 'OK'
+        size_hint_y: None
+        height: dp(50)
+''')
 
 class MainLayout(BoxLayout):
     pass
@@ -244,251 +291,279 @@ class PianoRollWidget(BoxLayout):
     current_time = NumericProperty(0)
     is_playing = BooleanProperty(False)
     note_labels = {}
-    scale_pitches = ListProperty([])  # To store pitches that are part of the scale
-    scale_intervals = ListProperty([])  # To store interval information
-    drum_pitches = ListProperty([])    # To store drum pitches
-    visible_pitches = ListProperty([]) # Combined list of pitches to display
-    minimum_width = NumericProperty(0)  # For horizontal scrolling
+    scale_pitches = ListProperty([])
+    scale_intervals = ListProperty([])
+    drum_pitches = ListProperty([])
+    visible_pitches = ListProperty([])
+    minimum_width = NumericProperty(dp(800))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.size_hint_y = None
-        self.height = len(self.pitch_range) * dp(18)
-        self.bind(
-            size=self._update_canvas,
-            pos=self._update_canvas,
-            notes=self._update_canvas,
-            current_time=self._update_playhead,
-            scale_pitches=self._update_canvas,
-            scale_intervals=self._update_canvas,
-            drum_pitches=self._update_canvas,
-            visible_pitches=self._update_canvas
-        )
-        self.playhead_line = None
-        self._key_colors = {}
-        self._init_key_colors()
-        self.selected_note = None
-        self.note_popup = None
-        self.scroll_view = None
+        try:
+            self.size_hint_y = None
+            self.height = len(self.pitch_range) * dp(18)
+            self.bind(
+                size=self._update_canvas,
+                pos=self._update_canvas,
+                notes=self._update_canvas,
+                current_time=self._update_playhead,
+                scale_pitches=self._update_canvas,
+                scale_intervals=self._update_canvas,
+                drum_pitches=self._update_canvas,
+                visible_pitches=self._update_canvas
+            )
+            self.playhead_line = None
+            self._key_colors = {}
+            self._init_key_colors()
+            self.selected_note = None
+            self.note_popup = None
+            self.scroll_view = None
+            Logger.info("SriDAW: PianoRollWidget initialized")
+        except Exception as e:
+            Logger.error(f"SriDAW: PianoRollWidget init error: {e}")
 
     def _init_key_colors(self):
         """Initialize colors for piano keys (black/white)"""
-        black_keys = {1, 3, 6, 8, 10}  # Semitone offsets for black keys
-        for pitch in self.pitch_range:
-            if (pitch % 12) in black_keys:
-                self._key_colors[pitch] = (0.15, 0.15, 0.15, 1)  # Black keys
-            else:
-                self._key_colors[pitch] = (0.95, 0.95, 0.95, 1)  # White keys
+        try:
+            black_keys = {1, 3, 6, 8, 10}  # Semitone offsets for black keys
+            for pitch in self.pitch_range:
+                if (pitch % 12) in black_keys:
+                    self._key_colors[pitch] = (0.15, 0.15, 0.15, 1)  # Black keys
+                else:
+                    self._key_colors[pitch] = (0.95, 0.95, 0.95, 1)  # White keys
+        except Exception as e:
+            Logger.error(f"SriDAW: Key color init error: {e}")
 
     def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos) and not self.is_playing:
-            # Find which note was clicked
-            for i, (offset, pitch, duration, velocity) in enumerate(self.notes):
-                if pitch not in self.visible_pitches:
-                    continue
+        try:
+            if self.collide_point(*touch.pos) and not self.is_playing:
+                # Find which note was clicked
+                for i, (offset, pitch, duration, velocity) in enumerate(self.notes):
+                    if pitch not in self.visible_pitches:
+                        continue
 
-                pitch_index = self.visible_pitches.index(pitch)
-                x = self.x + offset * self.beat_scale
-                y = self.y + pitch_index * dp(18)
-                w = duration * self.beat_scale
-                h = dp(17)
-
-                if (x <= touch.x <= x + w) and (y <= touch.y <= y + h):
-                    self.selected_note = i
-                    self.show_note_details(offset, pitch, duration, velocity)
-                    return True
-
-        return super().on_touch_down(touch)
-
-    def show_note_details(self, offset, pitch, duration, velocity):
-        pitch_name = self.midi_to_note_name(pitch)
-
-        # Find interval information if available
-        interval_info = ""
-        for interval in self.scale_intervals:
-            if interval[0] == pitch:
-                interval_info = f"\nInterval: {interval[1]} -> {interval[2]} ({interval[3]} semitones)"
-                break
-
-        # Check if drum note
-        drum_info = "\nDrum Note" if pitch in self.drum_pitches else ""
-
-        details = (
-            f"Pitch: {pitch_name} ({pitch})\n"
-            f"Offset: {offset:.2f} beats\n"
-            f"Duration: {duration:.2f} beats\n"
-            f"Velocity: {velocity}"
-            f"{drum_info}"
-            f"{interval_info}"
-        )
-
-        if not self.note_popup:
-            self.note_popup = NoteDetailsPopup()
-
-        self.note_popup.note_details = details
-        self.note_popup.open()
-
-    def midi_to_note_name(self, midi_note):
-        """Convert MIDI note number to note name"""
-        note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        octave = midi_note // 12 - 1
-        note_index = midi_note % 12
-        return f"{note_names[note_index]}{octave}"
-
-    def get_interval_name(self, semitones):
-        """Convert semitone distance to interval name"""
-        intervals = {
-            0: "P1", 1: "m2", 2: "M2", 3: "m3", 4: "M3", 5: "P4",
-            6: "TT", 7: "P5", 8: "m6", 9: "M6", 10: "m7", 11: "M7", 12: "P8"
-        }
-        return intervals.get(abs(semitones), f"{semitones}st")
-
-    def _update_canvas(self, *args):
-        self.canvas.after.clear()
-        self.note_labels = {}
-
-        # Calculate minimum width based on notes
-        max_beat = max((offset + duration) for offset, _, duration, _ in self.notes) if self.notes else 10
-        self.minimum_width = max_beat * self.beat_scale + dp(100)  # Add padding
-
-        with self.canvas.after:
-            # Draw piano keys background only for visible pitches
-            for i, pitch in enumerate(self.visible_pitches):
-                y = self.y + i * dp(18)
-                Color(*self._key_colors.get(pitch, (0.95, 0.95, 0.95, 1)))
-                Rectangle(pos=(self.x, y), size=(self.width, dp(18)))
-
-                # Draw key border
-                Color(0.3, 0.3, 0.3, 1)
-                Line(rectangle=(self.x, y, self.width, dp(18)), width=0.5)
-
-                # Draw pitch label
-                note_name = self.midi_to_note_name(pitch)
-                Color(1, 0.5, 0.5, 1) if pitch in self.drum_pitches else Color(0.1, 0.1, 0.1, 1)
-                self.draw_text(note_name, self.x + dp(5), y + dp(3), dp(12))
-
-            # Highlight scale rows
-            if self.scale_pitches:
-                Color(1.0, 0.9, 0.2, 0.15)  # Semi-transparent yellow
-                for pitch in self.scale_pitches:
-                    if pitch in self.visible_pitches:
-                        i = self.visible_pitches.index(pitch)
-                        Rectangle(pos=(self.x, self.y + i * dp(18)), size=(self.width, dp(18)))
-
-            # Draw measure/beat lines
-            Color(0.4, 0.4, 0.4, 0.6)
-            for beat in range(int(self.minimum_width / self.beat_scale) + 2):
-                x = self.x + beat * self.beat_scale
-                Line(points=[x, self.y, x, self.top], width=1)
-                if beat % 4 == 0:
-                    self.draw_text(str(beat), x + dp(2), self.y + self.height + dp(2), dp(12))
-
-            # Draw interval lines and labels
-            if self.scale_intervals:
-                for start_pitch, end_pitch, semitones, _, _ in self.scale_intervals:
-                    if start_pitch in self.visible_pitches and end_pitch in self.visible_pitches:
-                        start_i = self.visible_pitches.index(start_pitch)
-                        end_i = self.visible_pitches.index(end_pitch)
-                        start_y = self.y + start_i * dp(18) + dp(9)
-                        end_y = self.y + end_i * dp(18) + dp(9)
-                        
-                        Color(0.9, 0.2, 0.9, 0.7) # Purple line
-                        Line(points=[self.x + dp(10), start_y, self.x + dp(40), end_y], width=dp(1.5))
-                        
-                        interval_name = self.get_interval_name(semitones)
-                        self.draw_text(interval_name, self.x + dp(25), (start_y + end_y)/2, dp(12), center=True)
-
-            # Draw notes
-            for i, (offset, pitch, duration, velocity) in enumerate(self.notes):
-                if pitch in self.visible_pitches:
                     pitch_index = self.visible_pitches.index(pitch)
                     x = self.x + offset * self.beat_scale
                     y = self.y + pitch_index * dp(18)
                     w = duration * self.beat_scale
                     h = dp(17)
-                    
-                    highlight = 1.0 if i == self.selected_note else 0.8
-                    if pitch in self.drum_pitches: Color(0.9, 0.2, 0.2, highlight)
-                    elif velocity == 101: Color(1.0, 0.9, 0.2, highlight)
-                    elif velocity == 102: Color(0.2, 0.9, 0.3, highlight)
-                    elif velocity == 103: Color(0.2, 0.5, 1.0, highlight)
-                    else: Color(0.8, 0.5, 0.5 + (velocity / 200), highlight)
 
-                    self.draw_rounded_rect(x, y, w, h, dp(3))
-                    Color(0, 0, 0, 0.3)
-                    Line(rounded_rectangle=(x, y, w, h, dp(3)), width=1)
-                    
-                    if w > dp(20):
-                        note_name = self.midi_to_note_name(pitch)
-                        Color(0.1, 0.1, 0.1, 1) if velocity == 101 else Color(1, 1, 1, 1)
-                        self.draw_text(note_name, x + dp(3), y + dp(2), dp(12))
+                    if (x <= touch.x <= x + w) and (y <= touch.y <= y + h):
+                        self.selected_note = i
+                        self.show_note_details(offset, pitch, duration, velocity)
+                        return True
+        except Exception as e:
+            Logger.error(f"SriDAW: Touch error: {e}")
 
-            # Playhead line
-            if self.is_playing:
-                Color(1, 0.2, 0.2, 0.9)
-                self.playhead_line = Line(points=[self.x + self.current_time * self.beat_scale, self.y,
-                                                  self.x + self.current_time * self.beat_scale, self.top],
-                                          width=dp(3))
+        return super().on_touch_down(touch)
+
+    def show_note_details(self, offset, pitch, duration, velocity):
+        try:
+            pitch_name = self.midi_to_note_name(pitch)
+
+            # Find interval information if available
+            interval_info = ""
+            for interval in self.scale_intervals:
+                if interval[0] == pitch:
+                    interval_info = f"\nInterval: {interval[1]} -> {interval[2]} ({interval[3]} semitones)"
+                    break
+
+            # Check if drum note
+            drum_info = "\nDrum Note" if pitch in self.drum_pitches else ""
+
+            details = (
+                f"Pitch: {pitch_name} ({pitch})\n"
+                f"Offset: {offset:.2f} beats\n"
+                f"Duration: {duration:.2f} beats\n"
+                f"Velocity: {velocity}"
+                f"{drum_info}"
+                f"{interval_info}"
+            )
+
+            if not self.note_popup:
+                self.note_popup = NoteDetailsPopup()
+
+            self.note_popup.note_details = details
+            self.note_popup.open()
+        except Exception as e:
+            Logger.error(f"SriDAW: Note details error: {e}")
+
+    def midi_to_note_name(self, midi_note):
+        """Convert MIDI note number to note name"""
+        try:
+            note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+            octave = midi_note // 12 - 1
+            note_index = midi_note % 12
+            return f"{note_names[note_index]}{octave}"
+        except:
+            return f"Note{midi_note}"
+
+    def get_interval_name(self, semitones):
+        """Convert semitone distance to interval name"""
+        try:
+            intervals = {
+                0: "P1", 1: "m2", 2: "M2", 3: "m3", 4: "M3", 5: "P4",
+                6: "TT", 7: "P5", 8: "m6", 9: "M6", 10: "m7", 11: "M7", 12: "P8"
+            }
+            return intervals.get(abs(semitones), f"{semitones}st")
+        except:
+            return "?"
+
+    def _update_canvas(self, *args):
+        try:
+            self.canvas.after.clear()
+            self.note_labels = {}
+
+            # Calculate minimum width based on notes
+            if self.notes:
+                max_beat = max((offset + duration) for offset, _, duration, _ in self.notes)
+                self.minimum_width = max(dp(800), max_beat * self.beat_scale + dp(100))
+            else:
+                self.minimum_width = dp(800)
+
+            with self.canvas.after:
+                # Draw piano keys background only for visible pitches
+                for i, pitch in enumerate(self.visible_pitches):
+                    y = self.y + i * dp(18)
+                    Color(*self._key_colors.get(pitch, (0.95, 0.95, 0.95, 1)))
+                    Rectangle(pos=(self.x, y), size=(self.width, dp(18)))
+
+                    # Draw key border
+                    Color(0.3, 0.3, 0.3, 1)
+                    Line(rectangle=(self.x, y, self.width, dp(18)), width=0.5)
+
+                    # Draw pitch label
+                    note_name = self.midi_to_note_name(pitch)
+                    Color(1, 0.5, 0.5, 1) if pitch in self.drum_pitches else Color(0.1, 0.1, 0.1, 1)
+                    self.draw_text(note_name, self.x + dp(5), y + dp(3), dp(12))
+
+                # Highlight scale rows
+                if self.scale_pitches:
+                    Color(1.0, 0.9, 0.2, 0.15)  # Semi-transparent yellow
+                    for pitch in self.scale_pitches:
+                        if pitch in self.visible_pitches:
+                            i = self.visible_pitches.index(pitch)
+                            Rectangle(pos=(self.x, self.y + i * dp(18)), size=(self.width, dp(18)))
+
+                # Draw measure/beat lines
+                Color(0.4, 0.4, 0.4, 0.6)
+                for beat in range(int(self.minimum_width / self.beat_scale) + 2):
+                    x = self.x + beat * self.beat_scale
+                    Line(points=[x, self.y, x, self.top], width=1)
+                    if beat % 4 == 0:
+                        self.draw_text(str(beat), x + dp(2), self.y + self.height + dp(2), dp(12))
+
+                # Draw notes
+                for i, (offset, pitch, duration, velocity) in enumerate(self.notes):
+                    if pitch in self.visible_pitches:
+                        pitch_index = self.visible_pitches.index(pitch)
+                        x = self.x + offset * self.beat_scale
+                        y = self.y + pitch_index * dp(18)
+                        w = duration * self.beat_scale
+                        h = dp(17)
+                        
+                        highlight = 1.0 if i == self.selected_note else 0.8
+                        if pitch in self.drum_pitches: 
+                            Color(0.9, 0.2, 0.2, highlight)
+                        elif velocity == 101: 
+                            Color(1.0, 0.9, 0.2, highlight)
+                        elif velocity == 102: 
+                            Color(0.2, 0.9, 0.3, highlight)
+                        elif velocity == 103: 
+                            Color(0.2, 0.5, 1.0, highlight)
+                        else: 
+                            Color(0.8, 0.5, 0.5 + (velocity / 200), highlight)
+
+                        self.draw_rounded_rect(x, y, w, h, dp(3))
+                        Color(0, 0, 0, 0.3)
+                        Line(rounded_rectangle=(x, y, w, h, dp(3)), width=1)
+                        
+                        if w > dp(20):
+                            note_name = self.midi_to_note_name(pitch)
+                            Color(0.1, 0.1, 0.1, 1) if velocity == 101 else Color(1, 1, 1, 1)
+                            self.draw_text(note_name, x + dp(3), y + dp(2), dp(12))
+
+        except Exception as e:
+            Logger.error(f"SriDAW: Canvas update error: {e}")
 
     def draw_rounded_rect(self, x, y, w, h, r):
-        if w < 2 * r or h < 2 * r: r = min(w / 2, h / 2)
-        Rectangle(pos=(x + r, y), size=(w - 2*r, h))
-        Rectangle(pos=(x, y + r), size=(w, h - 2*r))
-        Ellipse(pos=(x, y), size=(2*r, 2*r))
-        Ellipse(pos=(x + w - 2*r, y), size=(2*r, 2*r))
-        Ellipse(pos=(x, y + h - 2*r), size=(2*r, 2*r))
-        Ellipse(pos=(x + w - 2*r, y + h - 2*r), size=(2*r, 2*r))
+        try:
+            if w < 2 * r or h < 2 * r: 
+                r = min(w / 2, h / 2)
+            Rectangle(pos=(x + r, y), size=(w - 2*r, h))
+            Rectangle(pos=(x, y + r), size=(w, h - 2*r))
+            Ellipse(pos=(x, y), size=(2*r, 2*r))
+            Ellipse(pos=(x + w - 2*r, y), size=(2*r, 2*r))
+            Ellipse(pos=(x, y + h - 2*r), size=(2*r, 2*r))
+            Ellipse(pos=(x + w - 2*r, y + h - 2*r), size=(2*r, 2*r))
+        except Exception as e:
+            Logger.error(f"SriDAW: Draw rect error: {e}")
 
     def draw_text(self, text, x, y, font_size, center=False):
-        from kivy.core.text import Label as CoreLabel
-        label = CoreLabel(text=text, font_size=font_size, font_name='Mono', color=(1,1,1,1))
-        label.refresh()
-        texture = label.texture
-        if not texture: return
-        pos = (x - texture.width/2, y - texture.height/2) if center else (x, y)
-        Rectangle(texture=texture, pos=pos, size=texture.size)
+        try:
+            from kivy.core.text import Label as CoreLabel
+            label = CoreLabel(text=str(text), font_size=font_size, font_name='Mono', color=(1,1,1,1))
+            label.refresh()
+            texture = label.texture
+            if not texture: 
+                return
+            pos = (x - texture.width/2, y - texture.height/2) if center else (x, y)
+            Rectangle(texture=texture, pos=pos, size=texture.size)
+        except Exception as e:
+            Logger.error(f"SriDAW: Draw text error: {e}")
 
     def _update_playhead(self, *args):
-        if self.playhead_line: self.canvas.after.remove(self.playhead_line)
-        x_pos = self.x + self.current_time * self.beat_scale
-        with self.canvas.after:
-            Color(1, 0, 0, 0.9)
-            self.playhead_line = Line(points=[x_pos, self.y, x_pos, self.top], width=dp(2))
-        
-        # Auto-scroll
-        if self.scroll_view and self.is_playing:
-            vp_width = self.scroll_view.width
-            if self.width > vp_width:
-                scroll_x_norm = max(0, (x_pos - vp_width / 2) / (self.width - vp_width))
-                self.scroll_view.scroll_x = min(1.0, scroll_x_norm)
+        try:
+            if self.playhead_line: 
+                self.canvas.after.remove(self.playhead_line)
+            x_pos = self.x + self.current_time * self.beat_scale
+            with self.canvas.after:
+                Color(1, 0, 0, 0.9)
+                self.playhead_line = Line(points=[x_pos, self.y, x_pos, self.top], width=dp(2))
+            
+            # Auto-scroll
+            if self.scroll_view and self.is_playing:
+                vp_width = self.scroll_view.width
+                if self.width > vp_width:
+                    scroll_x_norm = max(0, (x_pos - vp_width / 2) / (self.width - vp_width))
+                    self.scroll_view.scroll_x = min(1.0, scroll_x_norm)
+        except Exception as e:
+            Logger.error(f"SriDAW: Playhead update error: {e}")
 
     def update_from_stream(self, music_stream):
-        self.notes, self.scale_pitches, self.scale_intervals, self.drum_pitches, self.visible_pitches = [], [], [], [], []
-        if not music_stream: return
-        
         try:
+            self.notes, self.scale_pitches, self.scale_intervals, self.drum_pitches, self.visible_pitches = [], [], [], [], []
+            if not music_stream: 
+                return
+            
             all_pitches, scale_notes_timed = set(), []
             for el in music_stream.recurse().notes:
-                if not hasattr(el, 'offset'): continue
+                if not hasattr(el, 'offset'): 
+                    continue
                 
-                vel = el.volume.velocity if hasattr(el.volume, 'velocity') else 100
+                vel = getattr(el.volume, 'velocity', 100) if hasattr(el, 'volume') else 100
                 is_drum = (vel == 104)
                 is_scale = (vel == 101)
                 
-                notes_to_add = el.notes if hasattr(el, 'notes') else [el]
+                notes_to_add = getattr(el, 'notes', [el])
                 for n in notes_to_add:
-                    all_pitches.add(n.pitch.midi)
-                    if is_drum and n.pitch.midi not in self.drum_pitches: self.drum_pitches.append(n.pitch.midi)
+                    pitch_midi = getattr(n.pitch, 'midi', 60)
+                    all_pitches.add(pitch_midi)
+                    if is_drum and pitch_midi not in self.drum_pitches: 
+                        self.drum_pitches.append(pitch_midi)
                     if is_scale:
-                        if n.pitch.midi not in self.scale_pitches: self.scale_pitches.append(n.pitch.midi)
-                        scale_notes_timed.append({'offset': el.offset, 'pitch': n.pitch.midi})
+                        if pitch_midi not in self.scale_pitches: 
+                            self.scale_pitches.append(pitch_midi)
+                        scale_notes_timed.append({'offset': el.offset, 'pitch': pitch_midi})
                     
-                    self.notes.append((el.offset, n.pitch.midi, el.duration.quarterLength, vel))
+                    duration = getattr(el.duration, 'quarterLength', 1.0)
+                    self.notes.append((el.offset, pitch_midi, duration, vel))
 
+            # Calculate intervals
             scale_notes_timed.sort(key=lambda x: x['offset'])
             for i in range(1, len(scale_notes_timed)):
                 prev_n, curr_n = scale_notes_timed[i-1], scale_notes_timed[i]
-                if abs(curr_n['offset'] - prev_n['offset']) < 1.0: # Temporal proximity
+                if abs(curr_n['offset'] - prev_n['offset']) < 1.0:
                     semitones = curr_n['pitch'] - prev_n['pitch']
                     if semitones != 0:
                         self.scale_intervals.append((prev_n['pitch'], curr_n['pitch'], semitones, prev_n['offset'], curr_n['offset']))
@@ -496,125 +571,177 @@ class PianoRollWidget(BoxLayout):
             self.visible_pitches = sorted(list(all_pitches.union(self.scale_pitches, self.drum_pitches)))
             self.notes.sort(key=lambda x: x[1])
             self.height = max(dp(100), len(self.visible_pitches) * dp(18))
+            
         except Exception as e:
-            print(f"Error updating piano roll: {e}\n{traceback.format_exc()}")
+            Logger.error(f"SriDAW: Stream update error: {e}")
 
 class Music21DAW(App):
     status_text = StringProperty("Ready")
 
     def build(self):
-        self.title = "Music21 Visual DAW"
-        self.layout = MainLayout()
-        self.status_label = self.layout.ids.status_label
+        try:
+            Logger.info("SriDAW: Building app...")
+            self.title = "Music21 Visual DAW"
+            self.layout = MainLayout()
+            
+            # Get status label safely
+            try:
+                self.status_label = self.layout.ids.status_label
+            except:
+                self.status_label = None
 
-        demo_code = '''from music21 import *
+            demo_code = '''from music21 import *
 
 # Create a demo composition
 s = stream.Stream()
 s.append(tempo.MetronomeMark(number=100))
 s.append(dynamics.Dynamic('mf'))
 
-# 🎵 C Natural Minor scale with special velocity
-scale_notes = ["C4", "D4", "Eb4", "F4", "G4", "Ab4", "Bb4", "C5"]
+# Simple scale
+scale_notes = ["C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"]
 for i, p in enumerate(scale_notes):
     n = note.Note(p, quarterLength=0.5)
     n.volume.velocity = 101  # Yellow (scale)
     s.insert(i * 0.5, n)
 
-# 🥁 Simple drum pattern
-drum_map = {'kick': 36, 'snare': 38, 'hi-hat': 42}
-for i in range(8):
-    s.insert(i, note.Note(drum_map['kick'], quarterLength=1.0, volume=dynamics.Volume(velocity=104)))
-    s.insert(i + 0.5, note.Note(drum_map['hi-hat'], quarterLength=0.5, volume=dynamics.Volume(velocity=104)))
-s.insert(1, note.Note(drum_map['snare'], quarterLength=1.0, volume=dynamics.Volume(velocity=104)))
-s.insert(3, note.Note(drum_map['snare'], quarterLength=1.0, volume=dynamics.Volume(velocity=104)))
-
-# 🎶 Chords (Cmin, Fmin, Gmin)
-chords = [("C3", "Eb3", "G3"), ("F3", "Ab3", "C4"), ("G3", "Bb3", "D4")]
-for i, c_notes in enumerate(chords):
-    c = chord.Chord(c_notes, quarterLength=2.0)
-    c.volume.velocity = 102  # Green (chords)
-    s.insert(i * 2.0, c)
-
-# 🎤 Melody phrase
-melody_notes = ["G4", "F4", "Eb4", "C4"]
-for i, p in enumerate(melody_notes):
-    n = note.Note(p, quarterLength=1.0)
-    n.volume.velocity = 103  # Blue (melody)
-    s.insert(i * 1.0 + 1.0, n)
-
 result = s
 '''
-        self.layout.ids.editor.text = demo_code
-        self.current_stream, self.media_player, self.temp_file, self.playback_clock = None, None, None, None
-        self.playback_start_time, self.playback_duration, self.bpm, self.beat_duration = 0, 0, 60, 1.0
-        Clock.schedule_once(lambda dt: self.run_code(), 0.5)
-        return self.layout
+            
+            try:
+                self.layout.ids.editor.text = demo_code
+            except:
+                Logger.error("SriDAW: Could not set editor text")
+
+            self.current_stream = None
+            self.media_player = None
+            self.temp_file = None
+            self.playback_clock = None
+            self.playback_start_time = 0
+            self.playback_duration = 0
+            self.bpm = 60
+            self.beat_duration = 1.0
+            
+            # Run demo code after a delay
+            Clock.schedule_once(lambda dt: self.run_code(), 1.0)
+            
+            Logger.info("SriDAW: App built successfully")
+            return self.layout
+            
+        except Exception as e:
+            Logger.error(f"SriDAW: Build error: {e}")
+            # Return minimal layout on error
+            from kivy.uix.label import Label
+            return Label(text=f"SriDAW Error: {e}")
 
     def run_code(self, *args):
-        if not MUSIC21_AVAILABLE:
-            self.status_text = "Error: music21 not available."
-            return
-        self.stop_audio()
         try:
-            env = {'stream': stream, 'note': note, 'tempo': tempo, 'chord': chord, 'dynamics': dynamics, 'articulations': articulations}
+            if not MUSIC21_AVAILABLE:
+                self.status_text = "Error: music21 not available."
+                return
+                
+            self.stop_audio()
+            
+            try:
+                editor_text = self.layout.ids.editor.text
+            except:
+                editor_text = "result = stream.Stream()"
+            
+            env = {
+                'stream': stream, 
+                'note': note, 
+                'tempo': tempo, 
+                'chord': chord, 
+                'dynamics': dynamics, 
+                'articulations': articulations
+            }
             local = {}
-            exec(self.layout.ids.editor.text, env, local)
+            
+            exec(editor_text, env, local)
             self.current_stream = local.get('result')
             
             if self.current_stream:
                 self.status_text = "Successfully parsed music stream"
-                self.layout.ids.piano_roll.scroll_view = self.layout.ids.piano_scroll
-                self.layout.ids.piano_roll.update_from_stream(self.current_stream)
+                try:
+                    self.layout.ids.piano_roll.scroll_view = self.layout.ids.piano_scroll
+                    self.layout.ids.piano_roll.update_from_stream(self.current_stream)
+                except:
+                    Logger.error("SriDAW: Could not update piano roll")
                 
-                tempo_marks = self.current_stream.flat.getElementsByClass(tempo.MetronomeMark)
-                self.bpm = tempo_marks[0].number if tempo_marks else 60
-                self.beat_duration = 60.0 / self.bpm
-                self.playback_duration = self.current_stream.duration.quarterLength
+                # Get tempo
+                try:
+                    tempo_marks = self.current_stream.flat.getElementsByClass(tempo.MetronomeMark)
+                    self.bpm = tempo_marks[0].number if tempo_marks else 60
+                    self.beat_duration = 60.0 / self.bpm
+                    self.playback_duration = self.current_stream.duration.quarterLength
+                except:
+                    self.bpm = 60
+                    self.beat_duration = 1.0
+                    self.playback_duration = 10.0
             else:
                 self.status_text = "Warning: No 'result' stream found"
-                self.layout.ids.piano_roll.update_from_stream(None)
+                try:
+                    self.layout.ids.piano_roll.update_from_stream(None)
+                except:
+                    pass
+                    
         except Exception as e:
             self.status_text = f"Execution Error: {str(e)}"
-            print(traceback.format_exc())
+            Logger.error(f"SriDAW: Run code error: {e}")
 
     def export_midi(self, *args):
-        if not self.current_stream:
-            self.status_text = "No music to export"
-            return
         try:
+            if not self.current_stream:
+                self.status_text = "No music to export"
+                return
+                
             if ANDROID:
-                from android.storage import primary_external_storage_path
-                export_dir = os.path.join(primary_external_storage_path(), "Download")
-                os.makedirs(export_dir, exist_ok=True)
+                try:
+                    from android.storage import primary_external_storage_path
+                    export_dir = os.path.join(primary_external_storage_path(), "Download")
+                    os.makedirs(export_dir, exist_ok=True)
+                except:
+                    export_dir = "/sdcard/Download"
+                    os.makedirs(export_dir, exist_ok=True)
             else:
                 export_dir = os.path.expanduser("~")
             
             midi_file = os.path.join(export_dir, f"sridaw_export_{int(time.time())}.mid")
             self.current_stream.write('midi', fp=midi_file)
             self.status_text = f"Exported to: {midi_file}"
+            
         except Exception as e:
             self.status_text = f"Export failed: {str(e)}"
-            print(traceback.format_exc())
+            Logger.error(f"SriDAW: Export error: {e}")
 
     def play_audio(self, *args):
-        if not self.current_stream:
-            self.status_text = "No music to play"
-            return
-        self.stop_audio()
         try:
-            temp_dir = tempfile.gettempdir()
+            if not self.current_stream:
+                self.status_text = "No music to play"
+                return
+                
+            self.stop_audio()
+            
+            # Create temp file
             if ANDROID:
-                temp_dir = Context.getCacheDir().getAbsolutePath()
+                try:
+                    temp_dir = Context.getCacheDir().getAbsolutePath()
+                except:
+                    temp_dir = "/data/data/org.example.sridaw/cache"
+                    os.makedirs(temp_dir, exist_ok=True)
+            else:
+                temp_dir = tempfile.gettempdir()
+                
             self.temp_file = os.path.join(temp_dir, "playback.mid")
             self.current_stream.write('midi', fp=self.temp_file)
 
-            if ANDROID: self._play_android()
-            elif platform.system() == "Linux": self._play_linux()
-            else: self.status_text = "Playback not supported on this OS"
+            if ANDROID: 
+                self._play_android()
+            else: 
+                self.status_text = "Playback not supported on this platform"
+                
         except Exception as e:
             self.status_text = f"Playback Error: {str(e)}"
-            print(traceback.format_exc())
+            Logger.error(f"SriDAW: Play error: {e}")
 
     def _play_android(self):
         try:
@@ -623,81 +750,136 @@ result = s
             self.media_player.setDataSource(self.temp_file)
 
             def on_prepared(mp):
-                self.layout.ids.piano_roll.is_playing = True
-                self.playback_start_time = time.time()
-                mp.start()
-                self._start_playhead_animation()
-                self.status_text = "Playing..."
+                try:
+                    self.layout.ids.piano_roll.is_playing = True
+                    self.playback_start_time = time.time()
+                    mp.start()
+                    self._start_playhead_animation()
+                    self.status_text = "Playing..."
+                except Exception as e:
+                    Logger.error(f"SriDAW: Prepared error: {e}")
+
+            def on_completion(mp):
+                self.stop_audio()
+
+            def on_error(mp, what, extra):
+                Logger.error(f"SriDAW: MediaPlayer error: {what}, {extra}")
+                self.stop_audio()
+                return True
 
             self.media_player.setOnPreparedListener(OnPreparedListener(on_prepared))
-            self.media_player.setOnCompletionListener(OnCompletionListener(lambda mp: self.stop_audio()))
-            self.media_player.setOnErrorListener(OnErrorListener(lambda mp, w, e: self.stop_audio()))
+            self.media_player.setOnCompletionListener(OnCompletionListener(on_completion))
+            self.media_player.setOnErrorListener(OnErrorListener(on_error))
             self.media_player.prepareAsync()
+            
         except Exception as e:
             self.status_text = f"Android Playback Error: {e}"
-            print(traceback.format_exc())
+            Logger.error(f"SriDAW: Android play error: {e}")
 
     def _start_playhead_animation(self):
-        self.playback_clock = Clock.schedule_interval(self._update_playback_progress, 1/60.)
+        try:
+            self.playback_clock = Clock.schedule_interval(self._update_playback_progress, 1/30.)
+        except Exception as e:
+            Logger.error(f"SriDAW: Playhead animation error: {e}")
 
     def _update_playback_progress(self, dt):
-        elapsed = time.time() - self.playback_start_time
-        current_beat = elapsed / self.beat_duration
-        if current_beat > self.playback_duration:
-            self.stop_audio()
-        else:
-            self.layout.ids.piano_roll.current_time = current_beat
-
-    def _play_linux(self):
-        # Implementation for Linux playback using fluidsynth or timidity
-        pass # Placeholder
+        try:
+            elapsed = time.time() - self.playback_start_time
+            current_beat = elapsed / self.beat_duration
+            if current_beat > self.playback_duration:
+                self.stop_audio()
+            else:
+                self.layout.ids.piano_roll.current_time = current_beat
+        except Exception as e:
+            Logger.error(f"SriDAW: Playback progress error: {e}")
 
     def stop_audio(self, *args):
-        if self.playback_clock:
-            self.playback_clock.cancel()
-            self.playback_clock = None
-        
-        if self.media_player:
+        try:
+            if self.playback_clock:
+                self.playback_clock.cancel()
+                self.playback_clock = None
+            
+            if self.media_player:
+                try:
+                    if self.media_player.isPlaying(): 
+                        self.media_player.stop()
+                    self.media_player.release()
+                except:
+                    pass
+                finally:
+                    self.media_player = None
+                    
             try:
-                if self.media_player.isPlaying(): self.media_player.stop()
-                self.media_player.release()
-            except Exception as e:
-                print(f"Error stopping mediaplayer: {e}")
-            finally:
-                self.media_player = None
+                self.layout.ids.piano_roll.is_playing = False
+                self.layout.ids.piano_roll.current_time = 0
+            except:
+                pass
                 
-        self.layout.ids.piano_roll.is_playing = False
-        self.layout.ids.piano_roll.current_time = 0
-        if "Playing" in self.status_text:
-            self.status_text = "Playback stopped"
+            if "Playing" in self.status_text:
+                self.status_text = "Playback stopped"
+                
+        except Exception as e:
+            Logger.error(f"SriDAW: Stop error: {e}")
 
     def save_code(self):
         try:
-            save_path = "last_music21_code.py"
             if ANDROID:
-                from android.storage import primary_external_storage_path
-                save_path = os.path.join(primary_external_storage_path(), "Download", "sridaw_code.py")
-            with open(save_path, "w") as f: f.write(self.layout.ids.editor.text)
+                try:
+                    from android.storage import primary_external_storage_path
+                    save_path = os.path.join(primary_external_storage_path(), "Download", "sridaw_code.py")
+                except:
+                    save_path = "/sdcard/Download/sridaw_code.py"
+                    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            else:
+                save_path = "last_music21_code.py"
+                
+            with open(save_path, "w") as f: 
+                f.write(self.layout.ids.editor.text)
             self.status_text = f"Code saved to {save_path}"
-        except Exception as e: self.status_text = f"Save error: {e}"
+            
+        except Exception as e: 
+            self.status_text = f"Save error: {e}"
+            Logger.error(f"SriDAW: Save error: {e}")
 
     def load_code(self):
         try:
-            load_path = "last_music21_code.py"
             if ANDROID:
-                from android.storage import primary_external_storage_path
-                load_path = os.path.join(primary_external_storage_path(), "Download", "sridaw_code.py")
+                try:
+                    from android.storage import primary_external_storage_path
+                    load_path = os.path.join(primary_external_storage_path(), "Download", "sridaw_code.py")
+                except:
+                    load_path = "/sdcard/Download/sridaw_code.py"
+            else:
+                load_path = "last_music21_code.py"
+                
             if os.path.exists(load_path):
-                with open(load_path, "r") as f: self.layout.ids.editor.text = f.read()
+                with open(load_path, "r") as f: 
+                    self.layout.ids.editor.text = f.read()
                 self.status_text = "Code loaded. Press 'Run'."
-            else: self.status_text = "No saved code found."
-        except Exception as e: self.status_text = f"Load error: {e}"
+            else: 
+                self.status_text = "No saved code found."
+                
+        except Exception as e: 
+            self.status_text = f"Load error: {e}"
+            Logger.error(f"SriDAW: Load error: {e}")
 
     def on_stop(self):
-        self.stop_audio()
-        if self.temp_file and os.path.exists(self.temp_file):
-            try: os.remove(self.temp_file)
-            except: pass
+        try:
+            self.stop_audio()
+            if self.temp_file and os.path.exists(self.temp_file):
+                try: 
+                    os.remove(self.temp_file)
+                except: 
+                    pass
+        except Exception as e:
+            Logger.error(f"SriDAW: Stop cleanup error: {e}")
 
 if __name__ == "__main__":
-    Music21DAW().run()
+    try:
+        Logger.info("SriDAW: Starting main application")
+        Music21DAW().run()
+    except Exception as e:
+        Logger.error(f"SriDAW: Main error: {e}")
+        print(f"Fatal error: {e}")
+        import traceback
+        traceback.print_exc()

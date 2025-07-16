@@ -13,7 +13,6 @@ log_level = 2
 warn_on_root = 1
 
 [app:source.exclude_patterns]
-# Exclude unnecessary files
 license
 images/
 doc/
@@ -33,3 +32,4 @@ android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET
 android.gradle_dependencies = 
 android.add_libs_armeabi_v7a = 
 android.env_vars = MPLBACKEND=agg
+android.accept_sdk_license = True
