@@ -1,7 +1,6 @@
 import sys, os
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
-
 #!/usr/bin/env python3
 """
 Enhanced Music21 Visual DAW - Scale Interval Display with Horizontal Scroll
@@ -47,13 +46,14 @@ except Exception as e:
     SDK_INT = 0
     print(f"Android imports failed (not Android?): {e}")
 
+# Import our minimal music21 implementation
 try:
     from music21 import stream, note, tempo, chord, dynamics, articulations
     MUSIC21_AVAILABLE = True
     print("music21 imported successfully!")
-except ImportError:
+except ImportError as e:
     MUSIC21_AVAILABLE = False
-    print("music21 import failed.")
+    print(f"music21 import failed: {e}")
 
 # Font registration with fallbacks
 font_registered = False
@@ -72,7 +72,6 @@ for path in font_paths:
             break
     except Exception as e:
         print(f"Font registration failed for {path}: {e}")
-
 
 if not font_registered:
     LabelBase.register(name="Mono", fn_regular=LabelBase.default_font)
@@ -476,7 +475,7 @@ class PianoRollWidget(BoxLayout):
                 is_drum = (vel == 104)
                 is_scale = (vel == 101)
                 
-                notes_to_add = el.notes if isinstance(el, chord.Chord) else [el]
+                notes_to_add = el.notes if hasattr(el, 'notes') else [el]
                 for n in notes_to_add:
                     all_pitches.add(n.pitch.midi)
                     if is_drum and n.pitch.midi not in self.drum_pitches: self.drum_pitches.append(n.pitch.midi)
@@ -568,7 +567,8 @@ result = s
                 self.layout.ids.piano_roll.scroll_view = self.layout.ids.piano_scroll
                 self.layout.ids.piano_roll.update_from_stream(self.current_stream)
                 
-                self.bpm = next((tm.number for tm in self.current_stream.flat.getElementsByClass(tempo.MetronomeMark) if tm.number), 60)
+                tempo_marks = self.current_stream.flat.getElementsByClass(tempo.MetronomeMark)
+                self.bpm = tempo_marks[0].number if tempo_marks else 60
                 self.beat_duration = 60.0 / self.bpm
                 self.playback_duration = self.current_stream.duration.quarterLength
             else:
