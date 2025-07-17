@@ -2,34 +2,21 @@
 title = SriDAW
 package.name = sridaw
 package.domain = org.example
-source.include_exts = py,png,jpg,kv,atlas,ttf
+source.include_exts = py,png,jpg,kv,atlas,ttf,txt,md
 version = 1.0
 orientation = portrait
 source.dir = .
-requirements = python3,kivy==2.2.1,pyjnius
+requirements = python3,kivy,pyjnius,android
+source.exclude_patterns = license,*.pyc,*.pyo,*.pyd,.git,.gitignore,.github/,build.sh,debug_tools.py,build_instructions.md
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
 
-[app:source.exclude_patterns]
-license
-images/
-doc/
-*.pyc
-*.pyo
-*.pyd
-.git
-.gitignore
-.github/
-
 [app.android]
-android.api = 30
+android.api = 33
 android.minapi = 21
 android.ndk = 25b
-android.sdk = 30
+android.sdk = 33
 android.permissions = WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,INTERNET
-android.gradle_dependencies = 
-android.add_libs_armeabi_v7a = 
-android.env_vars = MPLBACKEND=agg
-android.accept_sdk_license = True
+android.arch = arm64-v8a

@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def debug_log(message, level="INFO"):
     """Enhanced logging that works on both desktop and Android"""
     timestamp = time.strftime("%H:%M:%S")
-    log_msg = f"[{timestamp}] SriDAW-{level}: {message}"
+    log_msg = f"[{timestamp}] SriDAW-{level}: {str(message)}"
     
     # Always use Kivy logger
     if level == "ERROR":
@@ -441,7 +441,10 @@ class PianoRollWidget(BoxLayout):
 
             # Calculate minimum width based on notes
             if self.notes:
-                max_beat = max((offset + duration) for offset, _, duration, _ in self.notes)
+                try:
+                    max_beat = max((offset + duration) for offset, _, duration, _ in self.notes if duration > 0)
+                except ValueError:
+                    max_beat = 10.0
                 self.minimum_width = max(dp(800), max_beat * self.beat_scale + dp(100))
             else:
                 self.minimum_width = dp(800)
@@ -690,29 +693,7 @@ result = s
                     self.layout.ids.piano_roll.scroll_view = self.layout.ids.piano_scroll
                     self.layout.ids.piano_roll.update_from_stream(self.current_stream)
                 except:
-    log_msg = f"[{timestamp}] SriDAW-{level}: {message}"
-    
-    # Always use Kivy logger
-    if level == "ERROR":
-        Logger.error(f"SriDAW: {message}")
-    elif level == "WARN":
-        Logger.warning(f"SriDAW: {message}")
-    else:
-        Logger.info(f"SriDAW: {message}")
-    
-    # Also print to stdout for ADB logcat
-    print(log_msg)
-    
-    # On Android, also log to system
-    if ANDROID:
-        try:
-            import android
-            android.log(log_msg)
-        except:
-            pass
-
-debug_log("Starting application...")
-
+                    pass
                 
                 # Get tempo
                 try:
@@ -855,6 +836,14 @@ debug_log("Starting application...")
                     pass
                 finally:
                     self.media_player = None
+            
+            # Clean up temp file
+            if self.temp_file and os.path.exists(self.temp_file):
+                try:
+                    os.remove(self.temp_file)
+                except:
+                    pass
+                self.temp_file = None
                     
             try:
                 self.layout.ids.piano_roll.is_playing = False

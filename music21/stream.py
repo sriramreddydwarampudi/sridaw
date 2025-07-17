@@ -187,6 +187,7 @@ class Stream:
     def _variable_length(self, value):
         """Convert integer to MIDI variable length quantity"""
         try:
+            value = int(value)
             if value < 0:
                 value = 0
             result = []

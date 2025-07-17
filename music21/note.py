@@ -18,28 +18,42 @@ class Pitch:
         """Convert note name to MIDI number"""
         note_map = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
         
-        # Handle flats and sharps
-        if 'b' in name:
-            base_note = name[0]
-            octave = int(name[-1])
-            offset = -1
-        elif '#' in name:
-            base_note = name[0]
-            octave = int(name[-1])
-            offset = 1
-        else:
-            base_note = name[0]
-            octave = int(name[-1])
-            offset = 0
+        # Parse note name (e.g., "C4", "F#3", "Bb5")
+        note_name = name[0].upper()
+        octave = 4  # default octave
+        accidental = 0
         
-        return (octave + 1) * 12 + note_map[base_note] + offset
+        # Extract octave and accidental
+        rest = name[1:]
+        if rest:
+            if rest[0] in '#b':
+                if rest[0] == '#':
+                    accidental = 1
+                elif rest[0] == 'b':
+                    accidental = -1
+                if len(rest) > 1:
+                    try:
+                        octave = int(rest[1:])
+                    except:
+                        octave = 4
+            else:
+                try:
+                    octave = int(rest)
+                except:
+                    octave = 4
+        
+        base_midi = note_map.get(note_name, 0)
+        return (octave + 1) * 12 + base_midi + accidental
     
-    def _midi_to_name(self, midi):
+    def _midi_to_name(self, midi_num):
         """Convert MIDI number to note name"""
         note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        octave = midi // 12 - 1
-        note_index = midi % 12
+        octave = (midi_num // 12) - 1
+        note_index = midi_num % 12
         return f"{note_names[note_index]}{octave}"
+    
+    def __repr__(self):
+        return f"Pitch({self.name})"
 
 class Note:
     def __init__(self, pitch=None, quarterLength=1.0, volume=None):
